@@ -1,12 +1,50 @@
-<!-- login.html -->
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <title>ログイン</title>
-  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-auth-compat.js"></script>
-  <script>
-    // 同じ設定
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WORKOUT LOG ログイン</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+  <!-- iOS 向けホーム画面設定 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="MyGymLog">
+  <link rel="apple-touch-icon" sizes="180x180" href="img/fudaoxiang.png">
+  <meta name="theme-color" content="#526d82">
+</head>
+<body class="bg-light">
+  <div class="container mt-5">
+    <div class="card mx-auto" style="max-width: 400px;">
+      <div class="card-body">
+        <h4 class="card-title text-center mb-4">ログイン</h4>
+        <form id="loginForm">
+          <div class="form-group">
+            <label for="email">メールアドレス</label>
+            <input type="email" class="form-control" id="email" placeholder="メールアドレスを入力" required>
+          </div>
+          <div class="form-group">
+            <label for="password">パスワード</label>
+            <input type="password" class="form-control" id="password" placeholder="パスワードを入力" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">ログイン</button>
+          <div id="loginError" class="text-danger mt-2" style="display:none;"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JSなど -->
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+  <!-- Firebaseの初期化とログイン処理 -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-auth.js";
+
+    // Firebase 設定
     const firebaseConfig = {
     apiKey: "AIzaSyCGsox95fxZh4J4ZQz4pm2o2_YwXUbXcaU",
     authDomain: "fudaoxiang-chat.firebaseapp.com",
@@ -16,30 +54,28 @@
     appId: "1:1008159058306:web:4ba3fd0ed4595a09ac479b",
     measurementId: "G-EWMWZBX4TT"
   };
-    firebase.initializeApp(firebaseConfig);
-  </script>
-</head>
-<body>
-  <form id="loginForm">
-    <input type="email" id="email" placeholder="Email">
-    <input type="password" id="password" placeholder="Password">
-    <button type="submit">ログイン</button>
-  </form>
 
-  <script>
-    const auth = firebase.auth();
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
 
-    document.getElementById("loginForm").addEventListener("submit", (e) => {
+    // ログイン処理
+    const loginForm = document.getElementById("loginForm");
+    const loginError = document.getElementById("loginError");
+
+    loginForm.addEventListener("submit", (e) => {
       e.preventDefault();
       const email = document.getElementById("email").value;
       const password = document.getElementById("password").value;
-      auth.signInWithEmailAndPassword(email, password)
+
+      signInWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
-          console.log("ログイン成功", userCredential.user);
+          console.log("ログイン成功:", userCredential);
           window.location.href = "index.html";
         })
         .catch((error) => {
-          alert("ログイン失敗: " + error.message);
+          console.error("ログインエラー:", error);
+          loginError.style.display = "block";
+          loginError.textContent = "ログインに失敗しました: " + error.message;
         });
     });
   </script>

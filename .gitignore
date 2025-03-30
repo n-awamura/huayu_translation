@@ -67,6 +67,11 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# dotenv environment variables file
 .env
+
+# Cloudflare Workers config
 wrangler.toml
 wrangler.jsonc
+

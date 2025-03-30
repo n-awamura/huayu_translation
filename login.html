@@ -1,0 +1,47 @@
+<!-- login.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ログイン</title>
+  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-auth-compat.js"></script>
+  <script>
+    // 同じ設定
+    const firebaseConfig = {
+    apiKey: "AIzaSyCGsox95fxZh4J4ZQz4pm2o2_YwXUbXcaU",
+    authDomain: "fudaoxiang-chat.firebaseapp.com",
+    projectId: "fudaoxiang-chat",
+    storageBucket: "fudaoxiang-chat.firebasestorage.app",
+    messagingSenderId: "1008159058306",
+    appId: "1:1008159058306:web:4ba3fd0ed4595a09ac479b",
+    measurementId: "G-EWMWZBX4TT"
+  };
+    firebase.initializeApp(firebaseConfig);
+  </script>
+</head>
+<body>
+  <form id="loginForm">
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="password" placeholder="Password">
+    <button type="submit">ログイン</button>
+  </form>
+
+  <script>
+    const auth = firebase.auth();
+
+    document.getElementById("loginForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      auth.signInWithEmailAndPassword(email, password)
+        .then((userCredential) => {
+          console.log("ログイン成功", userCredential.user);
+          window.location.href = "index.html";
+        })
+        .catch((error) => {
+          alert("ログイン失敗: " + error.message);
+        });
+    });
+  </script>
+</body>
+</html>

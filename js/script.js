@@ -301,9 +301,13 @@ function createNewSession() {
 
 async function callGeminiApi(prompt, modelName, retryCount = 0) {
   console.log("callGeminiApi called with prompt:", prompt);
-  const apiKey = 'AIzaSyDkX0dNltJWjEJI8vQ-jMhWzM0SAEjOx94';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-  const payload = { contents: [{ parts: [{ text: prompt }] }] };
+
+  const url = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev"; // ← あなたの新しい Cloudflare Worker URL に置き換えてください
+
+  const payload = {
+    prompt: prompt,
+    model: modelName
+  };
 
   try {
     const response = await fetch(url, {
@@ -311,6 +315,7 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+
     if (!response.ok) {
       if (response.status === 429 && retryCount < 3) {
         console.warn("429 Too Many Requests. リトライ中...");
@@ -319,13 +324,13 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
       }
       throw new Error('Network response was not ok');
     }
+
     const resJson = await response.json();
-    if (resJson && resJson.candidates && resJson.candidates.length > 0) {
-      const text = resJson.candidates[0].content.parts[0].text.trim();
-      console.log("Gemini API response:", text);
-      return text;
+    if (resJson && resJson.result) {
+      console.log("Cloudflare Gemini response:", resJson.result);
+      return resJson.result.trim();
     } else {
-      console.error("Gemini API からの回答が返されませんでした。");
+      console.error("Cloudflareからの回答がありませんでした。");
       return null;
     }
   } catch (error) {
@@ -333,6 +338,7 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
     return null;
   }
 }
+
 
 async function callGemini() {
   console.log("callGemini called");

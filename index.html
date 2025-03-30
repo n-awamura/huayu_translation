@@ -42,6 +42,16 @@
   window.db = db;
 </script>
 
+<script>
+  firebase.auth().onAuthStateChanged((user) => {
+    if (!user) {
+      // ログインしていない → login.htmlへリダイレクト
+      window.location.href = "login.html";
+    }
+  });
+</script>
+
+
 </head>
 <body>
   <!-- ヘッダー -->

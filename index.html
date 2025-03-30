@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>CHAT</title>
+  <!-- iPhone SEなどスマホで正しく表示させるためのviewport設定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- 外部CSS -->
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Bootstrap Icons の読み込み -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  
+  <!-- Montserratフォント読み込み -->
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+  
+  <!-- Firebase App (必須) -->
+<script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
+<!-- Firebase Firestore (compat 版) -->
+<script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-firestore-compat.js"></script>
+<!-- Firebase Analytics (必要なら) -->
+<script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-analytics-compat.js"></script>
+
+<script>
+  // Your web app's Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyCGsox95fxZh4J4ZQz4pm2o2_YwXUbXcaU",
+    authDomain: "fudaoxiang-chat.firebaseapp.com",
+    projectId: "fudaoxiang-chat",
+    storageBucket: "fudaoxiang-chat.firebasestorage.app",
+    messagingSenderId: "1008159058306",
+    appId: "1:1008159058306:web:4ba3fd0ed4595a09ac479b",
+    measurementId: "G-EWMWZBX4TT"
+  };
+
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  firebase.analytics();
+  // Firestore を初期化し、グローバル変数 db にセット
+  const db = firebase.firestore();
+  window.db = db;
+</script>
+
+</head>
+<body>
+  <!-- ヘッダー -->
+  <header id="main-header">
+    <div class="logo">
+      <img src="img/elephant.png" alt="elephant" class="header-image">
+      <span class="title">CHAT</span>
+    </div>
+    <div class="header-controls">
+      <select id="model-select">
+        <option value="2.0 Flash" selected>2.0 Flash</option>
+        <option value="2.5 Pro">2.5 Pro</option>
+      </select>
+      <!-- 新規チャット開始用アイコン -->
+      <div class="new-chat" id="new-chat">
+        <i class="bi bi-pencil-square"></i>
+      </div>
+      <!-- 右端のメニューアイコン（Bootstrapの list アイコン） -->
+      <div class="dropdown-toggle" id="hamburger">
+        <i class="bi bi-list"></i>
+      </div>
+    </div>
+  </header>
+
+  <!-- サイドメニュー（メニュー） -->  
+  <div id="side-menu">
+    <div id="side-menu-header">
+      <span>Menu</span>
+      <button id="close-menu">×</button>
+    </div>
+    <div id="menu-content">
+      <!-- セッション一覧 -->
+      <div id="conversation-history" style="padding: 10px 10px 0 10px;">
+        <!-- Firebaseから取得したセッション一覧 -->
+      </div>
+      <!-- 固定フッター（3点リーダーメニュー） -->
+      <div id="menu-footer">
+        <div class="dropdown" id="footer-dropdown">
+          <i class="bi bi-three-dots-vertical"></i>
+          <!-- 3点リーダーメニューのドロップダウン -->
+          <div class="dropdown-content" id="dropdown-content">
+            <a href="#" id="restore-btn">リストア</a>
+            <a href="#" id="manual-backup-btn">バックアップ(手動)</a>
+            <a href="#" id="delete-btn">すべてのチャットを削除</a>
+            <!-- 要約を実行するボタンを追加 -->
+            <!-- <a href="#" id="summarize-btn">要約実行</a> -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- チャット全体のコンテナ -->
+  <div class="chat-container">
+    <!-- メッセージ一覧 -->
+    <div id="chatMessages" class="chat-messages">
+      <!-- JSでメッセージが追加される -->
+    </div>
+
+    <!-- 入力欄 -->
+    <div class="chat-input">
+      <textarea id="chatInput" placeholder="メッセージを入力..."></textarea>
+      <!-- 送信ボタン：Bootstrap Icons の send アイコン -->
+      <button id="sendBtn">
+        <i class="bi bi-send-fill"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- 外部JSの読み込み -->
+  <script src="js/script.js"></script>
+</body>
+</html>

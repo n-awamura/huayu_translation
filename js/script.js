@@ -453,7 +453,7 @@ async function callGemini() {
   // 点滅するテキストの作成
   const loadingText = document.createElement('div');
   loadingText.classList.add('bubble-text', 'blinking-text');
-  loadingText.innerText = "考え中です…";
+  loadingText.innerText = "考え中だゾウ…";
   bubble.appendChild(loadingText);
   
   // ローディング行に吹き出しを追加し、チャット画面に表示

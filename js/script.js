@@ -431,34 +431,53 @@ async function callGeminiSummary(prompt, retryCount = 0) {
 
 async function callGemini() {
   console.log("callGemini called");
-
-  // 1. チャット画面の「考え中です…」の一時メッセージを作成して表示
+  
   const chatMessagesDiv = document.getElementById('chatMessages');
+  
+  // --- 1. ローディング表示の作成 ---
+  // メッセージ行の作成（送り手は 'other' として表示）
   const loadingRow = document.createElement('div');
   loadingRow.classList.add('message-row', 'other');
-  loadingRow.style.opacity = "0.7"; // 少し薄くするなどの演出も可能
-  loadingRow.innerText = "考え中です…";
+  
+  // 象アイコンの作成
+  const elephantIcon = document.createElement('img');
+  elephantIcon.classList.add('icon');
+  elephantIcon.src = 'img/elephant.png'; // 画像パスは適宜変更してください
+  elephantIcon.alt = '象アイコン';
+  loadingRow.appendChild(elephantIcon);
+  
+  // 吹き出しの作成
+  const bubble = document.createElement('div');
+  bubble.classList.add('bubble');
+  
+  // 点滅するテキストの作成
+  const loadingText = document.createElement('div');
+  loadingText.classList.add('bubble-text', 'blinking-text');
+  loadingText.innerText = "考え中です…";
+  bubble.appendChild(loadingText);
+  
+  // ローディング行に吹き出しを追加し、チャット画面に表示
+  loadingRow.appendChild(bubble);
   chatMessagesDiv.appendChild(loadingRow);
   scrollToBottom();
-
-  // 2. 全会話履歴と最後のユーザーメッセージの取得
+  
+  // --- 2. Gemini API 呼び出し ---
   const history = buildPromptFromHistory();
   const lastUserMessage = currentSession.messages.slice().reverse().find(m => m.sender === "User");
   const simplePrompt = lastUserMessage ? lastUserMessage.text : "";
+  
   if (!simplePrompt) {
-    loadingRow.remove(); // 送信内容がなければ、考え中メッセージを削除
+    loadingRow.remove();
     return;
   }
-
-  // 3. Gemini API 呼び出し
+  
   const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
   if (!response || !response.answer) {
-    loadingRow.innerText = "回答が得られませんでした";
+    loadingText.innerText = "回答が得られませんでした";
     setTimeout(() => loadingRow.remove(), 3000);
     return;
   }
-
-  // 4. （必要に応じて）回答の後処理
+  
   const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。
 
 【元の回答】
@@ -466,15 +485,17 @@ ${response.answer}
 
 【会話履歴（参考）】
 ${history}`;
+  
   const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
   const finalAnswer = refined?.answer || response.answer;
-
-  // 5. 一時メッセージを削除し、最終回答を表示
-  loadingRow.remove();
-  addMessageRow(finalAnswer, 'other');
+  
+  // --- 3. ローディング表示の更新 ---
+  // 点滅アニメーションを解除し、最終回答に書き換え
+  loadingText.classList.remove('blinking-text');
+  loadingText.innerText = finalAnswer;
   scrollToBottom();
-
-  // 6. セッション情報を更新し、バックアップ
+  
+  // --- 4. セッション情報の更新 ---
   currentSession.messages.push({
     sender: 'Gemini',
     text: finalAnswer,
@@ -484,6 +505,7 @@ ${history}`;
   currentSession.updatedAt = new Date().toISOString();
   backupToFirebase();
 }
+
 
 
 

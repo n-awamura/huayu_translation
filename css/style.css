@@ -326,23 +326,27 @@ body {
 }
 
 /* ===== 吹き出しの三角形 ===== */
+/* ===== 吹き出しの三角形 (LINE風) ===== */
 .message-row.other .bubble::before {
   content: "";
   position: absolute;
-  top: 8px;
+  top: -5px;
   left: -10px;
-  border-width: 10px 10px 10px 0;
-  border-style: solid;
-  border-color: transparent #fff transparent transparent;
+  width: 20px;
+  height: 30px;
+  border-radius: 0 0 0 15px;
+  box-shadow: -3px -15px 0 -7px #fff inset;
 }
+
 .message-row.self .bubble::before {
   content: "";
   position: absolute;
-  top: 8px;
+  top: -5px;
   right: -10px;
-  border-width: 10px 0 10px 10px;
-  border-style: solid;
-  border-color: transparent transparent transparent var(--light-blue-gray);
+  width: 20px;
+  height: 30px;
+  border-radius: 0 0 15px 0;
+  box-shadow: 3px -15px 0 -7px var(--light-blue-gray) inset;
 }
 
 /* ===== 吹き出し内テキスト ===== */

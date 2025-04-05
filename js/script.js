@@ -449,7 +449,7 @@ async function callGemini() {
   const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
   if (!response || !response.answer) return;
 
-  // 3️⃣ 会話履歴全体を利用した後処理プロンプトを作成
+  // 3️⃣ 会話履歴全体を利用した後処理プロンプトを作成する
   const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。挨拶は繰り返さなくていいです。
 
 【元の回答】

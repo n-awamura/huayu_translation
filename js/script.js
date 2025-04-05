@@ -80,20 +80,16 @@ function addMessageRow(text, sender, timestamp = null) {
   chatMessagesDiv.appendChild(row);
 }
 
+// buildPromptFromHistoryを修正：全メッセージ（送信者と内容）を連結して返す
 function buildPromptFromHistory() {
-  if (!currentSession) return "ユーザー: (新規)";
-  const MAX_MESSAGES = 8;
-  const msgs = currentSession.messages || [];
-  const startIndex = Math.max(0, msgs.length - MAX_MESSAGES);
-  const recentMessages = msgs.slice(startIndex);
-  let promptText = "これまでの会話:\n";
-  recentMessages.forEach(item => {
-    promptText += `${item.sender}: ${item.text}\n`;
-  });
-  promptText += "\n以上を踏まえて回答してください。必ず語尾をだゾウにしてください。なお、天気の話題は日本語にしてください。";
-  return promptText;
+  if (!currentSession || !currentSession.messages?.length) return "";
+  return currentSession.messages
+    .map(m => `${m.sender}: ${m.text}`)
+    .join("\n");
 }
 
+/* 
+// 天気のAPI関連のコードは、グラウンディングで代替できるためコメントアウト
 async function getWeatherInfoForCity(city) {
   try {
     const response = await fetch(
@@ -109,15 +105,29 @@ async function getWeatherInfoForCity(city) {
     console.error(error);
   }
 }
+*/
 
 async function endCurrentSession() {
   if (!currentSession) return;
   if (currentSession.sessionState === "finished") return;
 
+  // メッセージがある場合のみ要約
   if (currentSession.messages && currentSession.messages.length > 0) {
     const newTitle = await summarizeSessionAsync(currentSession);
-    currentSession.title = newTitle;
+    // 戻り値がオブジェクトでないかチェック
+    if (typeof newTitle === "string") {
+      currentSession.title = newTitle;
+    } else {
+      // 万が一オブジェクトなどが返ってきた場合の保険
+      currentSession.title = currentSession.title || "無題";
+    }
+  } else {
+    // 空の場合はタイトルのままでもいいが、不要なら削除してもよい
+    // ここではとりあえず「finished」にして残す例
+    // もし不要なら conversationSessions から remove するなどの処理を行う
+    console.log("メッセージが空のため、要約は実施しません。");
   }
+
   currentSession.sessionState = "finished";
   currentSession.updatedAt = new Date().toISOString();
 
@@ -125,21 +135,33 @@ async function endCurrentSession() {
   updateSideMenu();
 }
 
+
 async function onSendButton() {
   console.log("onSendButton called");
   const input = document.getElementById('chatInput');
   const message = input.value.trim();
   if (!message) return;
 
+  // currentSession が存在しない場合は新規作成
   if (!currentSession) {
-    console.log("No current session, creating new session");
+    console.log("現在のセッションが存在しないため、新規セッションを作成します。");
     createNewSession();
     await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  // finished なセッションなら、再利用して active に戻す
+  else if (currentSession.sessionState !== "active") {
+    console.log("終了済みセッションを再利用するため、active に切り替えます。");
+    currentSession.sessionState = "active";
   }
 
   addMessageRow(message, 'self');
   input.value = '';
   scrollToBottom();
+
+  // タイトルが "無題" の場合は、今回のメッセージの先頭部分をタイトルに反映
+  if (currentSession.title === "無題" && message) {
+    currentSession.title = message.slice(0, 10) + (message.length > 10 ? "..." : "");
+  }
 
   currentSession.messages.push({
     sender: 'User',
@@ -148,34 +170,14 @@ async function onSendButton() {
   });
   currentSession.updatedAt = new Date().toISOString();
 
-  if (/天気|気温|晴れ|雨/.test(message)) {
-    const rawWeather = await getWeatherInfoForCity("Tokyo"); 
-    if (rawWeather) {
-      // ここで、Geminiに翻訳させる
-      const translationPrompt = 
-        `以下の文章を自然な日本語に翻訳して回答してください。語尾は「だゾウ」にしてください:\n${rawWeather}`;
-  
-      // Gemini API呼び出し（翻訳）
-      const translatedWeather = await callGeminiApi(translationPrompt, "gemini-2.0-flash");
-      if (translatedWeather) {
-        // 翻訳結果をチャット画面に表示
-        addMessageRow(translatedWeather, 'other');
-        currentSession.messages.push({
-          sender: 'Gemini',
-          text: translatedWeather,
-          timestamp: new Date()
-        });
-        currentSession.updatedAt = new Date().toISOString();
-        backupToFirebase();
-        scrollToBottom();
-      }
-    }
-  } else {
-    callGemini();
-  }
+  // Gemini 呼び出し（省略）
+  callGemini();
 
   backupToFirebase();
 }
+
+
+
 
 function toggleSideMenu() {
   console.log("toggleSideMenu called");
@@ -212,25 +214,40 @@ function updateSideMenu() {
   const historyDiv = document.getElementById('conversation-history');
   historyDiv.innerHTML = "";
 
-  const sorted = conversationSessions.slice().sort((a, b) => {
-    const aUpdated = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-    const bUpdated = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-    return bUpdated - aUpdated;
+  // currentSession が存在する場合のみ、それを active として扱う
+  const activeSessions = currentSession ? [currentSession] : [];
+
+  // currentSession 以外のセッションは finished とみなす
+  const finishedSessions = conversationSessions.filter(s => s.id !== currentSession?.id);
+
+  // finishedSessions について、空かつ「無題」のものは除外する
+  const finishedSessionsFiltered = finishedSessions.filter(s => {
+    const isEmpty = !s.messages || s.messages.length === 0;
+    const isUntitled = s.title === "無題";
+    return !(isEmpty && isUntitled);
   });
 
-  sorted.forEach(session => {
-    if (session.sessionState === "active") {
-      return;
-    }
+  // 両グループとも更新日時の降順にソート
+  activeSessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  finishedSessionsFiltered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+  // まず active (currentSession)、次に finishedSessions を表示
+  const sortedSessions = [...activeSessions, ...finishedSessionsFiltered];
+
+  sortedSessions.forEach(session => {
     const link = document.createElement('a');
     link.href = "#";
-    link.innerText = session.title || "無題";
+    link.innerText = session.title;
     link.style.display = "block";
     link.style.marginBottom = "5px";
     link.style.paddingTop = "5px";
     link.style.paddingLeft = "5px";
     link.style.textDecoration = "none";
     link.style.color = "#FFFFFF";
+    // currentSession と一致する場合のみ太字
+    if (session.id === currentSession?.id) {
+      link.style.fontWeight = "bold";
+    }
     link.addEventListener('click', e => {
       e.preventDefault();
       loadSessionById(session.id);
@@ -239,6 +256,13 @@ function updateSideMenu() {
     historyDiv.appendChild(link);
   });
 }
+
+
+
+
+
+
+
 
 function loadSessionById(id) {
   console.log("loadSessionById called, id=", id);
@@ -264,18 +288,42 @@ function loadSessionById(id) {
   scrollToBottom();
 }
 
-function startNewChat() {
+async function startNewChat() {
   console.log("startNewChat called");
-  if (currentSession && currentSession.sessionState === "active") {
-    endCurrentSession().then(() => {
-      createNewSession();
-    });
-  } else {
-    createNewSession();
+
+  // すでにアクティブかつ空のセッションがあれば、それを再利用
+  const activeEmptySession = conversationSessions.find(
+    s => s.sessionState === "active" && (!s.messages || s.messages.length === 0)
+  );
+
+  if (activeEmptySession) {
+    console.log("既存の空のアクティブセッションを再利用します:", activeEmptySession.id);
+    currentSession = activeEmptySession;
+    // 表示を初期化
+    document.getElementById('chatMessages').innerHTML = "";
+    lastMessageDate = "";
+    scrollToBottom();
+    return;
   }
+
+  // ここに来たということは「空のアクティブセッション」がない
+  // もし現在のセッションが active なら終了させる（中身があれば要約を取る）
+  if (currentSession && currentSession.sessionState === "active") {
+    await endCurrentSession();
+  }
+
+  // その後で新規セッションを作成
+  createNewSession();
 }
 
+
 function createNewSession() {
+  // 既にアクティブで、かつメッセージが一度も送信されていない（空）の場合は再利用
+  if (currentSession && currentSession.sessionState === "active" && (!currentSession.messages || currentSession.messages.length === 0)) {
+    console.log("既存の空のアクティブセッションを再利用します。");
+    return;
+  }
+
   const now = new Date();
   const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
   const session = {
@@ -299,21 +347,17 @@ function createNewSession() {
   });
 }
 
+
 async function callGeminiApi(prompt, modelName, retryCount = 0) {
   console.log("callGeminiApi called with prompt:", prompt);
 
-  const url = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev"; // ← あなたの新しい Cloudflare Worker URL に置き換えてください
-
-  const payload = {
-    prompt: prompt,
-    model: modelName
-  };
+  // ✅ グラウンディングに対応したモデルは gemini-1.5-pro のみ
+  const groundingUrl = "https://gemini-grounding.fudaoxiang-gym.workers.dev";
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const response = await fetch(`${groundingUrl}?q=${encodeURIComponent(prompt)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
     });
 
     if (!response.ok) {
@@ -326,11 +370,14 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
     }
 
     const resJson = await response.json();
-    if (resJson && resJson.result) {
-      console.log("Cloudflare Gemini response:", resJson.result);
-      return resJson.result.trim();
+    if (resJson && resJson.answer) {
+      console.log("Grounding Gemini response:", resJson);
+      return {
+        answer: resJson.answer.trim(),
+        sources: resJson.sources || []
+      };
     } else {
-      console.error("Cloudflareからの回答がありませんでした。");
+      console.error("Grounding Gemini APIからの回答がありませんでした。");
       return null;
     }
   } catch (error) {
@@ -339,61 +386,149 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
   }
 }
 
+// gemini-model-switcherを利用する新たな関数（要約用）
+async function callGeminiModelSwitcher(prompt, retryCount = 0) {
+  const modelSwitcherUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
+  const payload = {
+    prompt: prompt,
+    model: "gemini-2.0-flash"
+  };
+
+  try {
+    const response = await fetch(modelSwitcherUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      if (response.status === 429 && retryCount < 3) {
+        console.warn("429 Too Many Requests. リトライ中...");
+        await new Promise(r => setTimeout(r, 2000));
+        return callGeminiModelSwitcher(prompt, retryCount + 1);
+      }
+      throw new Error('Network response was not ok');
+    }
+
+    const resJson = await response.json();
+    if (resJson && resJson.result) {
+      console.log("Model Switcher response:", resJson.result);
+      return { answer: resJson.result.trim(), sources: [] };
+    } else {
+      console.error("Model Switcherからの回答がありませんでした。");
+      return null;
+    }
+  } catch (error) {
+    console.error("callGeminiModelSwitcherエラー:", error);
+    return null;
+  }
+}
+
+// summary用のGemini呼び出し：gemini-model-switcher経由でgemini-2.0-flashを利用
+async function callGeminiSummary(prompt, retryCount = 0) {
+  return await callGeminiModelSwitcher(prompt, retryCount);
+}
 
 async function callGemini() {
   console.log("callGemini called");
-  if (!currentSession) {
-    console.log("No currentSession => createNewSession()");
-    createNewSession();
-  }
-  const modelSelect = document.getElementById('model-select');
-  const selectedModel = modelSelect ? modelSelect.value : "2.0 Flash";
-  let modelName = "gemini-2.0-flash";
-  if (selectedModel === "2.5 Pro") {
-    modelName = "gemini-2.5-pro-exp-03-25";
-  }
-  const prompt = buildPromptFromHistory();
-  const responseText = await callGeminiApi(prompt, modelName);
-  if (!responseText) return;
 
-  addMessageRow(responseText, 'other');
+  if (!currentSession) createNewSession();
+
+  // 1️⃣ 全会話履歴を取得
+  const history = buildPromptFromHistory();
+  if (!history) return;
+
+  // 2️⃣ シンプルなプロンプトとして最後のユーザー発言を利用
+  const lastUserMessage = currentSession.messages
+    .slice()
+    .reverse()
+    .find(m => m.sender === "User");
+  const simplePrompt = lastUserMessage ? lastUserMessage.text : "";
+  if (!simplePrompt) return;
+
+  const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
+  if (!response || !response.answer) return;
+
+  // 3️⃣ 会話履歴全体を利用した後処理プロンプトを作成
+  const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。挨拶は繰り返さなくていいです。
+
+【元の回答】
+${response.answer}
+
+【会話履歴（参考）】
+${history}`;
+
+  // 4️⃣ もう一度 Gemini 呼び出し
+  const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
+
+  const finalAnswer = refined?.answer || response.answer;
+
+  // 5️⃣ 回答を表示（参考URLは出力しない）
+  addMessageRow(finalAnswer, 'other');
   scrollToBottom();
 
+  // 6️⃣ セッション保存（参考URLも sources として記憶）
   currentSession.messages.push({
     sender: 'Gemini',
-    text: responseText,
-    timestamp: new Date()
+    text: finalAnswer,
+    timestamp: new Date(),
+    sources: response.sources || []
   });
   currentSession.updatedAt = new Date().toISOString();
 
   backupToFirebase();
 }
 
-async function callGeminiSummary(prompt, retryCount = 0) {
-  const modelName = "gemini-2.0-flash";
-  return await callGeminiApi(prompt, modelName, retryCount);
-}
 
+// 会話全体を対象に要約を作成（過去の会話も覚えている）
 async function summarizeSessionAsync(session) {
   const allText = (session.messages || []).map(m => m.text).join(" ");
-  if (!allText) return session.title;
-  const prompt = `以下の会話を15文字程度で自然な要約をしてください。` +
-    `タイトルの前後に括弧以外の記号は入れないこと。\n${allText}`;
-  const summary = await callGeminiSummary(prompt);
-  return summary || session.title;
+  if (!allText) return session.title;  // 空ならそのまま
+  
+  const prompt = `以下の会話を15文字程度で自然な要約をしてください。タイトルの前後に括弧以外の記号は入れないこと。\n${allText}`;
+  const summaryObj = await callGeminiSummary(prompt);
+
+  // summaryObj が { answer: "...", ... } の形を想定
+  let summary = summaryObj?.answer;
+  if (typeof summary !== "string") {
+    summary = "無題";
+  }
+  return summary.trim() || "無題";
 }
+
+async function updateUntitledSessions() {
+  console.log("updateUntitledSessions called");
+  // conversationSessions には、すでに Firestore から読み込まれたセッションが入っている前提
+  for (const session of conversationSessions) {
+    if (session.title === "無題" && session.messages && session.messages.length > 0) {
+      console.log(`セッション ${session.id} のタイトルを要約処理で更新します。`);
+      const summary = await summarizeSessionAsync(session);
+      if (typeof summary === "string" && summary.trim() && summary.trim() !== "無題") {
+        session.title = summary.trim();
+        session.updatedAt = new Date().toISOString();
+        await db.collection("chatSessions").doc(session.id).set(session);
+      }
+    }
+  }
+  updateSideMenu();
+}
+
 
 async function backupToFirebase() {
   console.log("backupToFirebase called");
   try {
-    for (const session of conversationSessions) {
-      await db.collection("chatSessions").doc(session.id).set(session);
-      console.log(`セッション "${session.title}" (id=${session.id}) のバックアップ成功`);
+    // アクティブなセッションが存在する場合のみバックアップ
+    if (currentSession && currentSession.sessionState === "active") {
+      await db.collection("chatSessions").doc(currentSession.id).set(currentSession);
+      console.log(`アクティブなセッション "${currentSession.title}" (id=${currentSession.id}) のバックアップ成功`);
+    } else {
+      console.log("バックアップするアクティブなセッションは存在しません。");
     }
   } catch (error) {
     console.error("バックアップエラー:", error);
   }
 }
+
 
 function deleteLocalChats() {
   conversationSessions = [];
@@ -536,6 +671,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // 11. アプリ起動時: 既存セッションを読み込む
   restoreFromFirebase().then(() => {
+    updateUntitledSessions();
     if (!conversationSessions.some(s => s.sessionState === "active")) {
       createNewSession();
     }

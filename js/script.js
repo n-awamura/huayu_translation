@@ -434,47 +434,54 @@ async function callGemini() {
   
   const chatMessagesDiv = document.getElementById('chatMessages');
   
-  // --- 1. ローディング表示の作成 ---
-  // メッセージ行の作成（送り手は 'other' として表示）
-  const loadingRow = document.createElement('div');
-  loadingRow.classList.add('message-row', 'other');
+  // 6秒後に表示するローディング用の吹き出しを用意するためのタイマー
+  const delayTime = 6000;
+  let loadingRow = null;
+  let loadingText = null;
+  const updateTimeout = setTimeout(() => {
+    // 6秒経過後、ローディング用の吹き出しを作成して表示
+    loadingRow = document.createElement('div');
+    loadingRow.classList.add('message-row', 'other');
+    
+    // 象アイコンの作成
+    const elephantIcon = document.createElement('img');
+    elephantIcon.classList.add('icon');
+    elephantIcon.src = 'img/elephant.png';  // 画像パスは適宜調整
+    elephantIcon.alt = '象アイコン';
+    loadingRow.appendChild(elephantIcon);
+    
+    // 吹き出しの作成
+    const bubble = document.createElement('div');
+    bubble.classList.add('bubble');
+    
+    // 点滅するテキスト「考え中だゾウ...」を設定
+    loadingText = document.createElement('div');
+    loadingText.classList.add('bubble-text', 'blinking-text');
+    loadingText.innerText = "考え中だゾウ...";
+    bubble.appendChild(loadingText);
+    
+    loadingRow.appendChild(bubble);
+    chatMessagesDiv.appendChild(loadingRow);
+    scrollToBottom();
+  }, delayTime);
   
-  // 象アイコンの作成
-  const elephantIcon = document.createElement('img');
-  elephantIcon.classList.add('icon');
-  elephantIcon.src = 'img/elephant.png'; // 画像パスは適宜変更してください
-  elephantIcon.alt = '象アイコン';
-  loadingRow.appendChild(elephantIcon);
-  
-  // 吹き出しの作成
-  const bubble = document.createElement('div');
-  bubble.classList.add('bubble');
-  
-  // 点滅するテキストの作成
-  const loadingText = document.createElement('div');
-  loadingText.classList.add('bubble-text', 'blinking-text');
-  loadingText.innerText = "考え中だゾウ…";
-  bubble.appendChild(loadingText);
-  
-  // ローディング行に吹き出しを追加し、チャット画面に表示
-  loadingRow.appendChild(bubble);
-  chatMessagesDiv.appendChild(loadingRow);
-  scrollToBottom();
-  
-  // --- 2. Gemini API 呼び出し ---
+  // --- Gemini API 呼び出し処理 ---
   const history = buildPromptFromHistory();
   const lastUserMessage = currentSession.messages.slice().reverse().find(m => m.sender === "User");
   const simplePrompt = lastUserMessage ? lastUserMessage.text : "";
   
   if (!simplePrompt) {
-    loadingRow.remove();
+    clearTimeout(updateTimeout);
     return;
   }
   
   const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
   if (!response || !response.answer) {
-    loadingText.innerText = "回答が得られませんでした";
-    setTimeout(() => loadingRow.remove(), 3000);
+    clearTimeout(updateTimeout);
+    if (loadingRow && loadingText) {
+      loadingText.innerText = "回答が得られませんでした";
+      setTimeout(() => loadingRow.remove(), 3000);
+    }
     return;
   }
   
@@ -489,13 +496,20 @@ ${history}`;
   const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
   const finalAnswer = refined?.answer || response.answer;
   
-  // --- 3. ローディング表示の更新 ---
-  // 点滅アニメーションを解除し、最終回答に書き換え
-  loadingText.classList.remove('blinking-text');
-  loadingText.innerText = finalAnswer;
+  clearTimeout(updateTimeout);
+  
+  // --- 回答が返ってきたときの表示更新 ---
+  if (!loadingRow) {
+    // 6秒以内に回答が返った場合は、吹き出しを作成せず通常のメッセージ行を追加
+    addMessageRow(finalAnswer, 'other');
+  } else {
+    // 6秒後に作成された吹き出しが存在する場合は、点滅を解除してテキストを書き換え
+    loadingText.classList.remove('blinking-text');
+    loadingText.innerText = finalAnswer;
+  }
   scrollToBottom();
   
-  // --- 4. セッション情報の更新 ---
+  // --- セッション情報の更新 ---
   currentSession.messages.push({
     sender: 'Gemini',
     text: finalAnswer,
@@ -505,7 +519,6 @@ ${history}`;
   currentSession.updatedAt = new Date().toISOString();
   backupToFirebase();
 }
-
 
 
 

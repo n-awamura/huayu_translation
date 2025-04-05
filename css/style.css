@@ -363,14 +363,14 @@ body {
   font-size: 0.7rem;
   color: var(--main-text-color);
   bottom: 6px;
-  right: -40px;
+  right: -39px;
 }
 .message-row.self .bubble-time {
   position: absolute;
   font-size: 0.7rem;
   color: var(--main-text-color);
   bottom: 6px;
-  left: -40px;
+  left: -39px;
 }
 
 /* ===== 発言内容の区切り（日付表示） ===== */

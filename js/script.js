@@ -432,42 +432,49 @@ async function callGeminiSummary(prompt, retryCount = 0) {
 async function callGemini() {
   console.log("callGemini called");
 
-  if (!currentSession) createNewSession();
+  // 1. チャット画面の「考え中です…」の一時メッセージを作成して表示
+  const chatMessagesDiv = document.getElementById('chatMessages');
+  const loadingRow = document.createElement('div');
+  loadingRow.classList.add('message-row', 'other');
+  loadingRow.style.opacity = "0.7"; // 少し薄くするなどの演出も可能
+  loadingRow.innerText = "考え中です…";
+  chatMessagesDiv.appendChild(loadingRow);
+  scrollToBottom();
 
-  // 1️⃣ 全会話履歴を取得
+  // 2. 全会話履歴と最後のユーザーメッセージの取得
   const history = buildPromptFromHistory();
-  if (!history) return;
-
-  // 2️⃣ シンプルなプロンプトとして最後のユーザー発言を利用
-  const lastUserMessage = currentSession.messages
-    .slice()
-    .reverse()
-    .find(m => m.sender === "User");
+  const lastUserMessage = currentSession.messages.slice().reverse().find(m => m.sender === "User");
   const simplePrompt = lastUserMessage ? lastUserMessage.text : "";
-  if (!simplePrompt) return;
+  if (!simplePrompt) {
+    loadingRow.remove(); // 送信内容がなければ、考え中メッセージを削除
+    return;
+  }
 
+  // 3. Gemini API 呼び出し
   const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
-  if (!response || !response.answer) return;
+  if (!response || !response.answer) {
+    loadingRow.innerText = "回答が得られませんでした";
+    setTimeout(() => loadingRow.remove(), 3000);
+    return;
+  }
 
-  // 3️⃣ 会話履歴全体を利用した後処理プロンプトを作成する
-  const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。挨拶は繰り返さなくていいです。
+  // 4. （必要に応じて）回答の後処理
+  const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。
 
 【元の回答】
 ${response.answer}
 
 【会話履歴（参考）】
 ${history}`;
-
-  // 4️⃣ もう一度 Gemini 呼び出し
   const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
-
   const finalAnswer = refined?.answer || response.answer;
 
-  // 5️⃣ 回答を表示（参考URLは出力しない）
+  // 5. 一時メッセージを削除し、最終回答を表示
+  loadingRow.remove();
   addMessageRow(finalAnswer, 'other');
   scrollToBottom();
 
-  // 6️⃣ セッション保存（参考URLも sources として記憶）
+  // 6. セッション情報を更新し、バックアップ
   currentSession.messages.push({
     sender: 'Gemini',
     text: finalAnswer,
@@ -475,9 +482,9 @@ ${history}`;
     sources: response.sources || []
   });
   currentSession.updatedAt = new Date().toISOString();
-
   backupToFirebase();
 }
+
 
 
 // 会話全体を対象に要約を作成（過去の会話も覚えている）

@@ -347,29 +347,46 @@ body {
 .bubble-text {
   font-size: 0.95rem;
   line-height: 1.4;
-  white-space: pre-wrap; /* 元の改行を保持しつつ、自動折り返し */
-  margin-bottom: 4px;
-  overflow-wrap: break-word; /* 単語の途中でも折り返す */
+  white-space: pre-wrap;
+  margin-bottom: 4px; /* Base margin for the container */
+  overflow-wrap: break-word;
 }
 
-/* 吹き出し内テキストの強調 */
-.bubble-text strong {
+/* Default Paragraph Margin */
+.bubble-text p {
+  margin-top: 0;
+  margin-bottom: 0.6em; /* Space between paragraphs */
+}
+
+/* Title Paragraph Styling */
+.bubble-text p.chat-title {
+  margin-bottom: 0.3em; /* Reduced space after title */
+}
+
+.bubble-text p.chat-title strong {
   font-weight: bold;
+  line-height: 1.2; /* Keep title line-height adjusted */
 }
 
-/* 箇条書きアイテム ( * or 1. text) */
+/* List Styling */
+.bubble-text ul {
+  margin-top: 0.3em; /* Space before list */
+  margin-bottom: 0.6em; /* Space after list */
+  padding-left: 1.5em; /* Indentation for list */
+}
+
 .bubble-text li {
-  list-style: none; /* Prismテーマとの競合を避ける */
+  list-style: none;
   position: relative;
-  padding-left: 1.2em;
+  /* padding-left: 1.2em; */ /* Use ul padding instead */
   margin-bottom: 0.3em;
 }
 
 .bubble-text li::before {
   content: '•';
   position: absolute;
-  left: 0;
-  top: 0.1em; /* 位置微調整 */
+  left: -1.1em; /* Position marker relative to li */
+  top: 0.1em;
   color: var(--main-text-color);
   font-size: 1em;
 }
@@ -473,3 +490,75 @@ body {
 #conversation-history a[style*="bold"] { /* Style for active session */
     background-color: rgba(92, 64, 51, 0.2);
 }
+
+/* ===== コードブロック関連スタイル (再追加) ===== */
+/* コードブロックコンテナ */
+.code-block-container {
+  position: relative;
+  border-radius: 4px;
+  margin: 10px 0;
+  /* padding-top: 30px; */ /* FIX: Remove padding-top, button is inside <pre> now */
+}
+
+/* コードブロック本体 (Prismが<pre><code>を使う) */
+/* 基本スタイルはPrismテーマ(Okaidia)に任せる */
+.code-block-container pre {
+  margin: 0 !important;
+  padding: 1em !important;
+  overflow-x: auto;
+  border-radius: 4px !important; /* FIX: Apply border-radius to pre */
+  position: relative; /* FIX: Add relative positioning for the button */
+}
+
+.code-block-container pre[class*="language-"] {
+  padding: 1em !important;
+  margin: 0 !important;
+  /* border-radius: 0 0 4px 4px !important; */ /* FIX: Remove specific border-radius */
+}
+
+.code-block-container code[class*="language-"] {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap !important; /* 折り返しを強制 */
+  overflow-wrap: break-word;
+  background: none !important; /* 親の<pre>の背景を使う */
+  color: #abb2bf; /* Okaidiaテーマのデフォルトに近い色 */
+}
+
+/* Prismのコメント色 (Okaidiaテーマの場合) */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+	color: slategray;
+}
+
+/* コードブロック用コピーボタン */
+.copy-code-btn {
+  position: absolute;
+  top: 0.5em; /* FIX: Adjust positioning relative to <pre> padding */
+  right: 0.5em; /* FIX: Adjust positioning relative to <pre> padding */
+  background-color: #444c56;
+  color: #c9d1d9;
+  border: 1px solid #586069;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  opacity: 0.6; /* Slightly visible by default inside code block */
+}
+.code-block-container pre:hover .copy-code-btn { /* Show on pre hover */
+    opacity: 1;
+}
+/* Remove general hover rule for button itself if always visible on pre hover */
+/*
+.copy-code-btn:hover {
+  background-color: #586069;
+}
+*/
+.copy-code-btn i {
+  pointer-events: none;
+}
+/* ===== コードブロック関連スタイルここまで ===== */

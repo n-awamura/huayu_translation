@@ -24,8 +24,92 @@ function scrollToBottom() {
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
+// HTMLエスケープ用のヘルパー関数
+function escapeHtml(unsafe) {
+    const div = document.createElement('div');
+    div.textContent = unsafe;
+    return div.innerHTML;
+}
+
+// インラインのマークダウン（太字、リンク）を処理するヘルパー関数
+function processInlineFormatting(text) {
+    // 1. Escape the entire text first to prevent HTML injection
+    let escapedText = escapeHtml(text);
+
+    // 2. Replace markdown **bold** with <strong> tags
+    // Use a regex that avoids replacing already inside HTML tags (basic check)
+    escapedText = escapedText.replace(/(?<!&lt;|<)\*\*(?![*])(.*?)(?<![*])\*\*(?!&gt;|>)/g, (match, content) => {
+        // Avoid double-escaping content if escapeHtml handled '*' specially
+        // Re-escape content just in case, though escapeHtml should handle it
+        return `<strong>${escapeHtml(content)}</strong>`;
+    });
+
+
+    // 3. Replace URLs with <a> tags
+    // Use a regex that looks for URLs but tries to avoid those already in href attributes
+    const urlRegex = /(?<!href=["'])(https?:\/\/[^\s<>\"]+)/g; // Corrected regex
+    escapedText = escapedText.replace(urlRegex, (url) => {
+        // The URL itself is already escaped from step 1.
+        // We need the raw URL for the href attribute.
+        // Since we escaped first, we need to be careful here.
+        // A simpler approach might be to escape *after* replacements, but that's less safe.
+        // Let's stick to escaping first. The displayed URL will be escaped,
+        // but the href needs the original URL (which we don't have easily after escaping).
+        // Compromise: Use the escaped URL for both display and href. This is safer.
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+        // If original URL needed: would require more complex parsing before escaping.
+    });
+
+
+    return escapedText;
+}
+
+
+// テキストセグメントをHTMLに変換するメイン関数
+function processMarkdownSegment(segment) {
+    let finalHtml = '';
+    const lines = segment.trim().split('\n');
+    let listOpen = false;
+
+    lines.forEach(line => {
+        line = line.trim();
+        if (line === '') return;
+
+        // --- Determine Line Type (based on raw Markdown line) ---
+
+        // Rule 1: Title (starts with **)
+        if (line.match(/^\*\*(.*?)\*\*$/)) { // Corrected regex
+            if (listOpen) { finalHtml += '</ul>'; listOpen = false; }
+            const titleContent = line.slice(2, -2).trim();
+            // Escape content *before* putting in tags
+            finalHtml += `<p class="chat-title"><strong>${escapeHtml(titleContent)}</strong></p>`;
+        }
+        // Rule 2: List item (starts with * or 1.)
+        else if (line.match(/^(\*|\d+\.)\s+/)) { // Corrected regex
+            if (!listOpen) { finalHtml += '<ul>'; listOpen = true; }
+            const itemMatch = line.match(/^(\*|\d+\.)\s+(.*?)$/); // Corrected regex
+            const itemContent = itemMatch ? itemMatch[2].trim() : '';
+            // Process inline formatting (bold, links) for the content
+            finalHtml += `<li>${processInlineFormatting(itemContent)}</li>`;
+        }
+        // Rule 3: Paragraph (default)
+        else {
+            if (listOpen) { finalHtml += '</ul>'; listOpen = false; }
+            // Process inline formatting (bold, links) for the paragraph
+            finalHtml += `<p>${processInlineFormatting(line)}</p>`;
+        }
+    });
+
+    // Close list if it was the last element
+    if (listOpen) { finalHtml += '</ul>'; }
+
+    console.log("Processed Markdown Segment Result:", finalHtml);
+    return finalHtml;
+}
+
+
 function addMessageRow(text, sender, timestamp = null) {
-    console.log("--- addMessageRow Start (Simplified) ---");
+    console.log("--- addMessageRow Start (Corrected Code Block Handling) ---");
     console.log("Original Text:", text);
 
     const chatMessagesDiv = document.getElementById('chatMessages');
@@ -47,6 +131,7 @@ function addMessageRow(text, sender, timestamp = null) {
         chatMessagesDiv.appendChild(dateHeader);
     }
 
+
     // --- Create Row and Icon ---
     const row = document.createElement('div');
     row.classList.add('message-row', sender);
@@ -58,34 +143,70 @@ function addMessageRow(text, sender, timestamp = null) {
         row.appendChild(icon);
     }
 
+
     // --- Bubble Creation ---
     const bubble = document.createElement('div');
     bubble.classList.add('bubble');
     const bubbleText = document.createElement('div');
     bubbleText.classList.add('bubble-text');
 
-    // --- Simplified Text Processing ---
+    // --- Text Processing --- (Revised Flow for Code Blocks) ---
     const originalTextForCopy = text;
-    let processedHtml = escapeHtml(text); // Escape HTML first
+    const codeBlocks = []; // Keep track of code blocks separately if needed later
+    const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g; // FIX: Allow whitespace after lang name
+    let lastIndex = 0;
+    let match;
+    let blockIndex = 0;
+    const segments = []; // Array to hold alternating text and code block objects
 
-    // Apply Formatting Rules (Order is important)
-    // Headers: **Bold text:** -> <strong>...:</strong><br>
-    processedHtml = processedHtml.replace(/^(\s*)\*\*(.*?):\*\*(\s*)$/gm, '$1<strong>$2:</strong><br>$3');
-    // List items: * Item: or 1. Item: -> <li>Item</li> (Bold removed, Colon removed)
-    processedHtml = processedHtml.replace(/^(\s*)(\*|\d+\.)\s+(.*?):?(\s*)$/gm, (match, p1, bullet, content, p4) => {
-        let itemContent = content.replace(/\*\*(.*?)\*\*/g, '$1'); // Remove bold markers
-        const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
-        itemContent = itemContent.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-        return `${p1}<li>${itemContent}</li>${p4}`;
+    // 1. Extract Code Blocks and Identify Text Segments
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+        // Add text segment before the code block
+        if (match.index > lastIndex) {
+            segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+        }
+
+        // Add code block segment
+        const lang = match[1] || 'plaintext';
+        const code = match[2];
+        segments.push({ type: 'code', lang: lang, content: code, index: blockIndex });
+        codeBlocks.push({ lang, code }); // Optional: Store extracted code blocks
+
+        lastIndex = codeBlockRegex.lastIndex; // Update index for next segment
+        blockIndex++;
+    }
+    // Add the remaining text segment after the last code block
+    if (lastIndex < text.length) {
+        segments.push({ type: 'text', content: text.substring(lastIndex) });
+    }
+
+    console.log("Processed Segments (Text/Code):", segments);
+
+    // 2. Process Segments and Build Final HTML
+    let finalHtml = '';
+    segments.forEach(segment => {
+        if (segment.type === 'text') {
+            // Process the text segment using the markdown helper
+             if (segment.content && segment.content.trim()) { // Avoid processing empty/whitespace segments
+                 finalHtml += processMarkdownSegment(segment.content);
+             }
+        } else if (segment.type === 'code') {
+            // Generate HTML for the code block
+            const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
+            const escapedCode = escapeHtml(segment.content.trim()); // Trim code before escaping
+            // FIX: Move button inside <pre>
+            const codeBlockHtml = `<div class="code-block-container">
+                                    <pre>
+<button class="copy-code-btn" data-clipboard-target="#${codeId}" title="コードをコピー"><i class="bi bi-clipboard"></i></button>
+<code id="${codeId}" class="language-${segment.lang}">${escapedCode}</code>
+</pre>
+                                  </div>`;
+            finalHtml += codeBlockHtml; // Add code block HTML directly
+        }
     });
-    // Remaining Bold: **Bold text** -> <strong>...</strong>
-    processedHtml = processedHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // URLs (simple, might double-link in rare cases)
-    const urlRegexGlobal = /(https?:\/\/[^\s<>"]+)/g;
-    processedHtml = processedHtml.replace(urlRegexGlobal, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 
-    console.log("Processed HTML:", processedHtml); // ★ Log
-    bubbleText.innerHTML = processedHtml;
+    console.log("Final HTML with Code Blocks Correctly Interleaved:", finalHtml);
+    bubbleText.innerHTML = finalHtml; // Set the final HTML
 
     // --- Timestamp Creation ---
     const bubbleTime = document.createElement('div');
@@ -95,6 +216,7 @@ function addMessageRow(text, sender, timestamp = null) {
     const minutes = nowTime.getMinutes().toString().padStart(2, '0');
     bubbleTime.innerText = `${hours}:${minutes}`;
     console.log("Created Timestamp element:", bubbleTime.innerText);
+
 
     // --- Message Copy Button ---
     const copyMsgBtn = document.createElement('button');
@@ -114,10 +236,11 @@ function addMessageRow(text, sender, timestamp = null) {
             .catch(err => console.error('コピー失敗:', err));
     });
 
+
     // Append elements to bubble
     bubble.appendChild(bubbleText);
-    bubble.appendChild(copyMsgBtn); // Copy button stays inside bubble
-    bubble.appendChild(bubbleTime); // ★ Append Timestamp INSIDE bubble
+    bubble.appendChild(copyMsgBtn); // Copy button inside bubble
+    bubble.appendChild(bubbleTime); // Timestamp inside bubble
     console.log("Appended text, copy button, and timestamp to bubble.");
 
     // Append bubble to row
@@ -127,21 +250,50 @@ function addMessageRow(text, sender, timestamp = null) {
     chatMessagesDiv.appendChild(row);
     console.log("Appended row to chat messages div.");
 
-    // --- Remove Prism.js highlighting ---
-    // setTimeout(() => { ... Prism.highlightAllUnder ... }, 0);
+    // --- Highlight Code Blocks using Prism.js --- (Re-enabled)
+     console.log("Setting timeout for Prism.highlightAllUnder...");
+     setTimeout(() => {
+         console.log("Executing Prism.highlightAllUnder...");
+         try {
+             // Ensure Prism is loaded before calling this
+             if (typeof Prism !== 'undefined') {
+                 Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
+                 console.log("Prism highlighting finished.");
+             } else {
+                 console.warn("Prism object not found, skipping highlighting.");
+             }
+         } catch (e) {
+             console.error("Error during Prism highlighting:", e);
+         }
+     }, 0); // Delay execution slightly
 
-    // --- Remove Code Block Copy Listener ---
-    // bubble.querySelectorAll('.copy-code-btn').forEach(btn => { ... });
+    // --- Code Block Copy Listener (Re-added) ---
+     bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
+        if (!btn.dataset.listenerAttached) {
+            btn.addEventListener('click', (event) => {
+                const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
+                const codeElement = document.querySelector(targetSelector);
+                if (codeElement) {
+                    // Copy the *unescaped* text content for code blocks
+                    navigator.clipboard.writeText(codeElement.textContent)
+                        .then(() => {
+                            const buttonElement = event.target.closest('button');
+                            buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
+                            buttonElement.title = 'コピーしました';
+                            setTimeout(() => {
+                                buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
+                                buttonElement.title = 'コードをコピー';
+                            }, 1500);
+                        })
+                        .catch(err => console.error('コードのコピー失敗:', err));
+                }
+            });
+            btn.dataset.listenerAttached = 'true';
+             // Assuming button HTML is generated with icon & title
+        }
+    });
 
-    console.log("--- addMessageRow End (Simplified) ---");
-}
-
-// HTMLエスケープ用のヘルパー関数 (Keep this function)
-function escapeHtml(unsafe) {
-    // Use the browser's built-in capabilities to escape HTML
-    const div = document.createElement('div');
-    div.textContent = unsafe;
-    return div.innerHTML;
+    console.log("--- addMessageRow End (Corrected Code Block Handling) ---");
 }
 
 function buildPromptFromHistory() {

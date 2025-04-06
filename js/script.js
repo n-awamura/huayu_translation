@@ -696,9 +696,20 @@ document.addEventListener('DOMContentLoaded', function() {
   document.addEventListener('click', function handleOutsideClick(e) {
     const sideMenu = document.getElementById('side-menu');
     const hamburger = document.getElementById('hamburger');
-    if (!sideMenu.classList.contains('open')) return;
-    if (sideMenu.contains(e.target) || hamburger.contains(e.target)) return;
-    sideMenu.classList.remove('open');
+    const footerDropdown = document.getElementById('footer-dropdown');
+
+    // サイドメニューが開いていて、クリックがメニュー内でもハンバーガーでもない場合
+    if (sideMenu.classList.contains('open') && 
+        !sideMenu.contains(e.target) && 
+        !hamburger.contains(e.target)) {
+      sideMenu.classList.remove('open');
+    }
+
+    // フッターのドロップダウンが開いていて、クリックがドロップダウン内でもアイコンでもない場合
+    if (footerDropdown.classList.contains('open') && 
+        !footerDropdown.contains(e.target)) {
+      footerDropdown.classList.remove('open');
+    }
   });
 
   window.addEventListener('beforeunload', function() {

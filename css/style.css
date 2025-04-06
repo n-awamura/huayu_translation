@@ -353,24 +353,50 @@ body {
 .bubble-text {
   font-size: 0.95rem;
   line-height: 1.4;
-  white-space: pre-wrap;
+  white-space: pre-wrap; /* 元の改行を保持しつつ、自動折り返し */
   margin-bottom: 4px;
+  overflow-wrap: break-word; /* 単語の途中でも折り返す */
 }
 
-/* ===== 時刻表示（吹き出し外） ===== */
-.message-row.other .bubble-time {
-  position: absolute;
-  font-size: 0.7rem;
-  color: var(--main-text-color);
-  bottom: 6px;
-  right: -39px;
+/* 吹き出し内テキストの強調 */
+.bubble-text strong {
+  font-weight: bold;
 }
-.message-row.self .bubble-time {
+
+/* 箇条書きアイテム ( * or 1. text) */
+.bubble-text li {
+  list-style: none; /* Prismテーマとの競合を避ける */
+  position: relative;
+  padding-left: 1.2em;
+  margin-bottom: 0.3em;
+}
+
+.bubble-text li::before {
+  content: '•';
   position: absolute;
+  left: 0;
+  top: 0.1em; /* 位置微調整 */
+  color: var(--main-text-color);
+  font-size: 1em;
+}
+
+/* ===== 時刻表示（吹き出し外、bubble基準） ===== */
+.bubble-time { /* ★ 基本スタイル */
+  position: absolute;
+  bottom: 3px; /* 垂直位置調整 */
   font-size: 0.7rem;
   color: var(--main-text-color);
-  bottom: 6px;
-  left: -39px;
+  white-space: nowrap; /* 時刻が折り返さないように */
+}
+
+.message-row.other .bubble-time { /* ★ 相手の吹き出し: 右外側6px */
+  left: 100%;
+  margin-left: 10px;
+}
+
+.message-row.self .bubble-time { /* ★ 自分の吹き出し: 左外側6px */
+  right: 100%;
+  margin-right: 10px;
 }
 
 /* ===== 発言内容の区切り（日付表示） ===== */
@@ -393,4 +419,47 @@ body {
   0% { opacity: 1; }
   50% { opacity: 0.5; }
   100% { opacity: 1; }
+}
+
+/* ===== ここから追加 ===== */
+
+/* 吹き出し内リンク */
+.bubble-text a {
+  color: var(--link-color);
+  text-decoration: underline;
+}
+.bubble-text a:hover {
+  color: var(--link-hover-color);
+}
+
+/* メッセージコピーボタン (吹き出し内) */
+.copy-msg-btn {
+  position: absolute;
+  bottom: 5px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--main-text-color);
+  cursor: pointer;
+  padding: 2px; /* 少しパディングを追加 */
+  font-size: 0.9em;
+  opacity: 0; /* ★ 通常は非表示 */
+  transition: opacity 0.2s ease;
+  z-index: 1; /* テキストより手前に */
+}
+.bubble:hover .copy-msg-btn {
+  opacity: 0.6; /* ★ 吹き出しホバーで表示 */
+}
+.copy-msg-btn:hover {
+  opacity: 1;
+}
+.copy-msg-btn i {
+  pointer-events: none;
+  vertical-align: middle; /* アイコンの垂直位置調整 */
+}
+
+/* 1行のみの場合にコピーボタンがテキストと重なるのを防ぐ */
+/* (より確実にはJSで高さを判定する必要があるが、簡易的な対策) */
+.bubble-text:only-child {
+  /* padding-bottom: 20px; */ /* ボタン分の余白を確保する案 (見た目次第) */
 }

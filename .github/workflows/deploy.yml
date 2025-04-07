@@ -1,0 +1,51 @@
+name: Deploy to GitHub Pages
+
+# main ブランチにプッシュされた時にトリガー
+on:
+  push:
+    branches:
+      - main
+  # 手動実行も可能にする (オプション)
+  workflow_dispatch:
+
+# 同時実行制御: 同じグループ (ここではブランチ名) のワークフローが既に実行中の場合、古い方をキャンセルして新しい方を実行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest # 最新のUbuntu環境で実行
+
+    permissions:
+      contents: write # リポジトリへの書き込み権限 (gh-pagesブランチへのプッシュに必要)
+      pages: write # GitHub Pagesへのデプロイ権限
+      id-token: write # OIDCトークンによる認証を使う場合に必要 (actions/deploy-pages@v4)
+
+    steps:
+      - name: Checkout repository # リポジトリのコードをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Setup Pages # GitHub Pagesの基本的な設定 (オプションだが推奨)
+        id: pages
+        uses: actions/configure-pages@v5
+
+      # 公開したいファイルを一時ディレクトリにコピー
+      - name: Prepare deployment directory
+        run: |
+          mkdir ./public
+          cp index.html ./public/
+          cp login.html ./public/
+          cp -r css ./public/
+          cp -r js ./public/
+          cp -r img ./public/
+          # 他に公開したいファイルがあればここに追加 (例: cp favicon.ico ./public/)
+
+      - name: Upload artifact # デプロイメントアーティファクトをアップロード (GitHub Pagesの設定で参照される)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public # 公開ファイルがコピーされたディレクトリを指定
+
+      - name: Deploy to GitHub Pages # GitHub Pagesにデプロイ
+        id: deployment
+        uses: actions/deploy-pages@v4 # upload-pages-artifactと連携してデプロイ 

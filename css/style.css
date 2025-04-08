@@ -46,6 +46,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 0 10px;
+  position: relative; /* Set as positioning context */
 }
 
 #main-header .logo {
@@ -489,6 +490,73 @@ body {
 }
 #conversation-history a[style*="bold"] { /* Style for active session */
     background-color: rgba(92, 64, 51, 0.2);
+}
+
+/* ===== 象の吹き出しスタイル ===== */
+.speech-bubble {
+  position: absolute;
+  left: 56px; /* Position it after the elephant image + 20px */
+  top: 7px; /* Small offset from the header top */
+  transform: none; /* Remove previous transform */
+  background-color: #fff; /* 背景は白のまま */
+  color: #324454;
+  border-radius: 10px;
+  padding: 5px 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  
+  opacity: 0;
+  visibility: hidden;
+  
+  z-index: 10;  /* 吹き出し本体全体の z-index */
+  white-space: nowrap;
+  pointer-events: none;
+  max-width: calc(100% - 100px); /* ヘッダー内に収めるための最大幅を調整 */
+  overflow: visible; /* はみ出した部分を表示 */
+  text-overflow: ellipsis; /* はみ出した部分を省略記号で表示 */
+}
+
+/* 通常時のフォントサイズ */
+.speech-bubble {
+  font-size: 0.9rem;  /* フォントサイズを少し大きく調整 */
+}
+
+/* 文字数が多い場合用のクラス */
+.speech-bubble.long {
+  font-size: 0.75rem;  /* フォントサイズを少し大きく調整 */
+}
+
+.speech-bubble.visible {
+  opacity: 1;
+  visibility: visible;
+  border: 1px solid rgba(240, 210, 140, 1); /* ヘッダーの背景色に合わせる */
+}
+
+/* LINE風の三角形 */
+.speech-bubble::before {
+  content: "";
+  position: absolute;
+  top: 25%;
+  left: -10px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 30px;
+  border-radius: 0 0 0 15px;
+  box-shadow: -3px -15px 0 -7px #fff inset; /* 背景は白のまま */
+  z-index: 11;
+}
+
+/* 三角形の影 */
+.speech-bubble::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  left: -11px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 30px;
+  border-radius: 0 0 0 15px;
+  box-shadow: -3px -15px 0 -7px rgba(240, 210, 140, 0.9) inset; /* ヘッダーの背景色に近づける */
+  z-index: 9;
 }
 
 /* ===== コードブロック関連スタイル (再追加) ===== */

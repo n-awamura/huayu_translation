@@ -774,6 +774,43 @@ async function summarizeAllSessions() {
   }
 }
 
+// 吹き出しのテキストの長さに応じてフォントサイズを調整する関数
+function adjustSpeechBubbleFontSize() {
+  const bubble = document.getElementById('elephantBubble');
+  if (!bubble) return;
+  
+  // 吹き出しの最大幅を取得
+  const maxWidth = bubble.offsetWidth;
+  
+  // テキストの長さをチェック
+  const textLength = bubble.textContent.length;
+  
+  // テキストの長さに応じてフォントサイズを調整
+  if (textLength > 50) {
+    bubble.classList.add('long');
+  } else {
+    bubble.classList.remove('long');
+  }
+  
+  // 吹き出しの幅が最大幅を超えているかチェック
+  if (bubble.scrollWidth > maxWidth) {
+    // さらにフォントサイズを小さくするクラスを追加
+    bubble.classList.add('long');
+  }
+}
+
+// 吹き出しのテキストを設定する関数
+function setSpeechBubbleText(text) {
+  const bubble = document.getElementById('elephantBubble');
+  if (!bubble) return;
+  
+  bubble.textContent = text;
+  bubble.classList.add('visible');
+  
+  // フォントサイズを調整
+  adjustSpeechBubbleFontSize();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   console.log("DOMContentLoaded event fired");
 
@@ -874,4 +911,140 @@ document.addEventListener('DOMContentLoaded', function() {
       createNewSession();
     }
   });
+
+  // ===============================
+  // 象の吹き出し機能
+  // ===============================
+  const elephantImg = document.getElementById("elephantImg");
+  const elephantBubble = document.getElementById("elephantBubble");
+
+  // 都市の緯度経度
+  const cities = [
+    { name: "台南", latitude: 23.1417, longitude: 120.2513 },
+    { name: "台北", latitude: 25.0330, longitude: 121.5654 },
+    { name: "台中", latitude: 24.1477, longitude: 120.6736 },
+    { name: "高雄", latitude: 22.6273, longitude: 120.3014 },
+    { name: "台東", latitude: 22.7583, longitude: 121.1444 },
+    { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
+    { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
+    { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 }
+  ];
+
+  // 方角を計算する関数
+  function calculateDirection(lat1, lon1, lat2, lon2) {
+    // 方角を計算（度数法）
+    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+    let bearing = Math.atan2(y, x) * (180 / Math.PI);
+    bearing = (bearing + 360) % 360; // 0-360度に変換
+
+    // 方角を日本語の16方位に変換
+    const directions = [
+      "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
+      "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"
+    ];
+    const index = Math.round(bearing / 22.5) % 16;
+    return directions[index];
+  }
+
+  // 2点間の距離を計算する関数（Haversine formula）
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // 地球の半径（km）
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    return Math.round(distance); // 整数に丸める
+  }
+
+  // ランダムな都市を選択する関数
+  function getRandomCity() {
+    const randomIndex = Math.floor(Math.random() * cities.length);
+    return cities[randomIndex];
+  }
+
+  // GPS情報を取得して選択された都市との距離と方向を計算する関数
+  function getCityInfo(city) {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject("お使いのブラウザは位置情報をサポートしていません。");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const currentLat = position.coords.latitude;
+          const currentLon = position.coords.longitude;
+          
+          const distance = calculateDistance(
+            currentLat, currentLon, 
+            city.latitude, city.longitude
+          );
+          
+          const direction = calculateDirection(
+            currentLat, currentLon, 
+            city.latitude, city.longitude
+          );
+          
+          resolve({ city: city.name, distance, direction });
+        },
+        (error) => {
+          let errorMessage = "位置情報の取得に失敗しました。";
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = "位置情報の利用が許可されていません。";
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = "位置情報を取得できませんでした。";
+              break;
+            case error.TIMEOUT:
+              errorMessage = "位置情報の取得がタイムアウトしました。";
+              break;
+          }
+          reject(errorMessage);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    });
+  }
+
+  if (elephantImg && elephantBubble) {
+    elephantImg.addEventListener("click", function() {
+      // 吹き出しが表示されている場合は非表示に、非表示の場合は表示する
+      if (elephantBubble.classList.contains("visible")) {
+        elephantBubble.classList.remove("visible");
+      } else {
+        // ランダムな都市を選択
+        const randomCity = getRandomCity();
+        
+        // 位置情報を取得して選択された都市との距離と方向を計算
+        getCityInfo(randomCity)
+          .then(info => {
+            // 吹き出しの内容を設定
+            setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`);
+            
+            // 6秒後に吹き出しを非表示にする
+            setTimeout(() => {
+              elephantBubble.classList.remove("visible");
+            }, 6000);
+          })
+          .catch(error => {
+            // エラーメッセージを表示
+            setSpeechBubbleText(error);
+            
+            // 6秒後に吹き出しを非表示にする
+            setTimeout(() => {
+              elephantBubble.classList.remove("visible");
+            }, 6000);
+          });
+      }
+    });
+  }
+
+  // ウィンドウのリサイズ時にフォントサイズを再調整
+  window.addEventListener('resize', adjustSpeechBubbleFontSize);
 });

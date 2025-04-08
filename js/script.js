@@ -927,7 +927,8 @@ document.addEventListener('DOMContentLoaded', function() {
     { name: "台東", latitude: 22.7583, longitude: 121.1444 },
     { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
     { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
-    { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 }
+    { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 },
+    { name: "ニューヨーク", latitude: 40.7128, longitude: -74.0060 }
   ];
 
   // 方角を計算する関数

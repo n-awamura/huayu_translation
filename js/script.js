@@ -932,9 +932,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // 方角を計算する関数
   function calculateDirection(lat1, lon1, lat2, lon2) {
+    // 緯度経度をラジアンに変換
+    const lat1Rad = lat1 * Math.PI / 180;
+    const lon1Rad = lon1 * Math.PI / 180;
+    const lat2Rad = lat2 * Math.PI / 180;
+    const lon2Rad = lon2 * Math.PI / 180;
+    
     // 方角を計算（度数法）
-    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+    const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
+    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
     let bearing = Math.atan2(y, x) * (180 / Math.PI);
     bearing = (bearing + 360) % 360; // 0-360度に変換
 

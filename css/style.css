@@ -79,6 +79,9 @@ body {
   outline: none;
   font-family: "Noto Sans JP", sans-serif;
   font-size: 0.9rem;
+  padding: 2px 5px; /* 見た目の調整 */
+  border-radius: 4px; /* 角丸 */
+  cursor: pointer;
 }
 
 .new-chat,
@@ -168,7 +171,20 @@ body {
   border-top: 1px solid rgba(92, 64, 51, 0.3); /* Darker border */
   background-color: var(--header-bg-color); /* ★ Ensure background matches header */
   z-index: 1001; /* リストより上に表示 */
-  text-align: right; /* 右寄せ */
+  display: flex; /* 追加 */
+  justify-content: space-between; /* 追加 */
+  align-items: center; /* 追加 */
+}
+
+/* 追加: ユーザーメール表示スタイル */
+.user-email {
+  font-size: 0.75rem;
+  color: var(--side-menu-text-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px; /* 必要に応じて調整 */
+  margin-right: 10px; /* 3点メニューとの間隔 */
 }
 
 /* 3点リーダーメニュー */

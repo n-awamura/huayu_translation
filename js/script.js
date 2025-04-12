@@ -250,25 +250,22 @@ function addMessageRow(text, sender, timestamp = null) {
     chatMessagesDiv.appendChild(row);
     console.log("Appended row to chat messages div.");
 
-    // --- Highlight Code Blocks using Prism.js --- (Re-enabled)
-     console.log("Setting timeout for Prism.highlightAllUnder...");
-     setTimeout(() => {
-         console.log("Executing Prism.highlightAllUnder...");
-         try {
-             // Ensure Prism is loaded before calling this
-             if (typeof Prism !== 'undefined') {
-                 Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
-                 console.log("Prism highlighting finished.");
-             } else {
-                 console.warn("Prism object not found, skipping highlighting.");
-             }
-         } catch (e) {
-             console.error("Error during Prism highlighting:", e);
-         }
-     }, 0); // Delay execution slightly
+    // --- Highlight Code Blocks using Prism.js --- (修正: 同期的に実行)
+    console.log("Executing Prism.highlightAllUnder...");
+    try {
+        // Ensure Prism is loaded before calling this
+        if (typeof Prism !== 'undefined') {
+            Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
+            console.log("Prism highlighting finished.");
+        } else {
+            console.warn("Prism object not found, skipping highlighting.");
+        }
+    } catch (e) {
+        console.error("Error during Prism highlighting:", e);
+    }
 
     // --- Code Block Copy Listener (Re-added) ---
-     bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
+    bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
         if (!btn.dataset.listenerAttached) {
             btn.addEventListener('click', (event) => {
                 const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
@@ -391,8 +388,15 @@ function toggleSideMenu() {
 
 async function updateSideMenuFromFirebase() {
   console.log("updateSideMenuFromFirebase called");
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("ユーザーがログインしていません。サイドメニューを更新できません。");
+    return;
+  }
   try {
-    const querySnapshot = await db.collection("chatSessions").get();
+    const querySnapshot = await db.collection("chatSessions")
+                                  .where("userId", "==", currentUser.uid)
+                                  .get();
     conversationSessions = [];
     querySnapshot.forEach(doc => {
       conversationSessions.push(doc.data());
@@ -500,6 +504,12 @@ async function startNewChat() {
 }
 
 function createNewSession() {
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("ユーザーがログインしていません。セッションを作成できません。");
+    return;
+  }
+
   if (currentSession && currentSession.sessionState === "active" && (!currentSession.messages || currentSession.messages.length === 0)) {
     console.log("既存の空のアクティブセッションを再利用します。");
     return;
@@ -513,7 +523,8 @@ function createNewSession() {
     messages: [],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
-    sessionState: "active"
+    sessionState: "active",
+    userId: currentUser.uid
   };
 
   conversationSessions.push(session);
@@ -565,11 +576,11 @@ async function callGeminiApi(prompt, modelName, retryCount = 0) {
   }
 }
 
-async function callGeminiModelSwitcher(prompt, retryCount = 0) {
+async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.0-flash', retryCount = 0) {
   const modelSwitcherUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
   const payload = {
     prompt: prompt,
-    model: "gemini-2.0-flash"
+    model: modelName
   };
 
   try {
@@ -583,7 +594,7 @@ async function callGeminiModelSwitcher(prompt, retryCount = 0) {
       if (response.status === 429 && retryCount < 3) {
         console.warn("429 Too Many Requests. リトライ中...");
         await new Promise(r => setTimeout(r, 2000));
-        return callGeminiModelSwitcher(prompt, retryCount + 1);
+        return callGeminiModelSwitcher(prompt, modelName, retryCount + 1);
       }
       throw new Error('Network response was not ok');
     }
@@ -639,14 +650,43 @@ async function callGemini() {
   
   const history = buildPromptFromHistory();
   const lastUserMessage = currentSession.messages.slice().reverse().find(m => m.sender === "User");
-  const simplePrompt = lastUserMessage ? lastUserMessage.text : "";
-  
-  if (!simplePrompt) {
+  const userInput = lastUserMessage ? lastUserMessage.text : "";
+
+  let promptToSend = "";
+  let skipRefinement = false;
+
+  if (!userInput) {
     clearTimeout(updateTimeout);
     return;
   }
-  
-  const response = await callGeminiApi(simplePrompt, "gemini-1.5-pro");
+
+  const modeSelect = document.getElementById('model-select');
+  const selectedMode = modeSelect ? modeSelect.value : 'normal';
+  console.log("Selected Mode:", selectedMode);
+
+  if (selectedMode === 'taiwan-mandarin') {
+    promptToSend = `「${userInput}」を台湾華語に訳してください。`;
+    console.log("Taiwan Mandarin Mode - Prompt:", promptToSend);
+  } else if (selectedMode === 'research') {
+    promptToSend = userInput;
+    console.log("Research Mode - Prompt (using user input):", promptToSend);
+  } else {
+    promptToSend = userInput;
+    console.log("Normal Mode - Prompt:", promptToSend);
+  }
+
+  // ★ モードに応じて呼び出すAPIを分岐
+  let response = null;
+  if (selectedMode === 'research') {
+    console.log("Calling Gemini Model Switcher (for Pro model)...");
+    response = await callGeminiModelSwitcher(promptToSend, 'gemini-2.5-pro-exp-03-25');
+  } else {
+    console.log("Calling Gemini API (Grounding - Flash model)...");
+    // ★ 他のモードでは既存の callGeminiApi を使用
+    response = await callGeminiApi(promptToSend, "gemini-1.5-pro"); // モデル名は現状維持 (必要なら調整)
+  }
+
+  // ★ response のチェックは共通
   if (!response || !response.answer) {
     clearTimeout(updateTimeout);
     if (loadingRow && loadingText) {
@@ -656,16 +696,21 @@ async function callGemini() {
     return;
   }
   
-  const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。
+  let finalAnswer = response.answer;
+  if (!skipRefinement) {
+    const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。
 
 【元の回答】
 ${response.answer}
 
 【会話履歴（参考）】
 ${history}`;
-  
-  const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
-  const finalAnswer = refined?.answer || response.answer;
+    console.log("Generating refinement prompt...");
+    const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
+    finalAnswer = refined?.answer || response.answer;
+  } else {
+    console.log("Skipping refinement prompt.");
+  }
   
   clearTimeout(updateTimeout);
   
@@ -674,6 +719,21 @@ ${history}`;
   } else {
     loadingText.classList.remove('blinking-text');
     loadingText.innerText = finalAnswer;
+
+    const existingBubble = loadingRow.querySelector('.bubble');
+    if (existingBubble) {
+        const existingTime = existingBubble.querySelector('.bubble-time');
+        if (existingTime) existingTime.remove();
+
+        const finalBubbleTime = document.createElement('div');
+        finalBubbleTime.classList.add('bubble-time');
+        const finalNow = new Date();
+        const finalHours = finalNow.getHours().toString().padStart(2, '0');
+        const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
+        finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
+        existingBubble.appendChild(finalBubbleTime);
+        console.log("Added timestamp to the final message bubble (loadingRow case).");
+    }
   }
   scrollToBottom();
   
@@ -719,10 +779,16 @@ async function updateUntitledSessions() {
 
 async function backupToFirebase() {
   console.log("backupToFirebase called");
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("ユーザーがログインしていません。バックアップできません。");
+    return;
+  }
   try {
     if (currentSession && currentSession.sessionState === "active") {
+      currentSession.userId = currentUser.uid;
       await db.collection("chatSessions").doc(currentSession.id).set(currentSession);
-      console.log(`アクティブなセッション "${currentSession.title}" (id=${currentSession.id}) のバックアップ成功`);
+      console.log(`アクティブなセッション "${currentSession.title}" (id=${currentSession.id}) のバックアップ成功 (ユーザー: ${currentUser.uid})`);
     } else {
       console.log("バックアップするアクティブなセッションは存在しません。");
     }
@@ -740,9 +806,16 @@ function deleteLocalChats() {
 }
 
 async function restoreFromFirebase() {
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("ユーザーがログインしていません。リストアできません。");
+    return;
+  }
   try {
     console.log("restoreFromFirebase called");
-    const querySnapshot = await db.collection("chatSessions").get();
+    const querySnapshot = await db.collection("chatSessions")
+                                  .where("userId", "==", currentUser.uid)
+                                  .get();
     conversationSessions = [];
     querySnapshot.forEach(doc => {
       conversationSessions.push(doc.data());
@@ -1054,4 +1127,51 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ウィンドウのリサイズ時にフォントサイズを再調整
   window.addEventListener('resize', adjustSpeechBubbleFontSize);
+
+  // 認証状態の監視とUI更新 (単一ユーザー前提)
+  firebase.auth().onAuthStateChanged((user) => {
+    const userEmailSpan = document.getElementById('user-email');
+    if (user) {
+      console.log("ログイン中のユーザー:", user.email);
+      if (userEmailSpan) {
+        userEmailSpan.textContent = user.email;
+      }
+      // ログイン時にリストアなどを実行 (既存の処理があれば活かす)
+      // restoreFromFirebase(); // 必要に応じてコメント解除
+      // updateSideMenu(); // 必要に応じてコメント解除
+    } else {
+      console.log("ユーザーはログアウトしています。");
+      if (userEmailSpan) {
+        userEmailSpan.textContent = ''; // メールアドレスをクリア
+      }
+      // HTML側でも認証チェックしているので、ここでのリダイレクトは不要な場合が多い
+      // if (window.location.pathname !== '/login.html') {
+      //   window.location.href = "login.html";
+      // }
+    }
+  });
+
+  // ログアウトリンクのイベントリスナー
+  const logoutLink = document.getElementById('logout-link');
+  if (logoutLink) {
+    logoutLink.addEventListener('click', (e) => {
+      e.preventDefault(); // デフォルトのリンク動作をキャンセル
+      logout();
+    });
+  } else {
+    console.error("Logout link not found in DOMContentLoaded");
+  }
 });
+
+// ===== ここから追加 =====
+// ログアウト関数
+function logout() {
+  firebase.auth().signOut().then(() => {
+    console.log("ログアウトしました");
+    // ログアウト後の処理 (ログインページへリダイレクト)
+    window.location.href = "login.html";
+  }).catch((error) => {
+    console.error("ログアウトエラー:", error);
+  });
+}
+// ===== ここまで追加 =====

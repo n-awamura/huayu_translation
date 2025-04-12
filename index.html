@@ -63,10 +63,11 @@
       <span class="title">CHAT</span>
     </div>
     <div class="header-controls">
-      <!-- <select id="model-select">
-        <option value="2.0 Flash" selected>2.0 Flash</option>
-        <option value="2.5 Pro">2.5 Pro</option>
-      </select> -->
+      <select id="model-select">
+        <option value="normal" selected></option>
+        <option value="taiwan-mandarin">台湾華語</option>
+        <option value="research">2.5 Pro</option>
+      </select>
       <div class="new-chat" id="new-chat">
         <i class="bi bi-pencil-square"></i>
       </div>
@@ -85,12 +86,14 @@
     <div id="menu-content">
       <div id="conversation-history" style="padding: 10px 10px 0 10px;"></div>
       <div id="menu-footer">
+        <span id="user-email" class="user-email"></span>
         <div class="dropdown" id="footer-dropdown">
           <i class="bi bi-three-dots-vertical"></i>
           <div class="dropdown-content" id="dropdown-content">
             <a href="#" id="restore-btn">リストア</a>
             <a href="#" id="manual-backup-btn">バックアップ(手動)</a>
             <a href="#" id="delete-btn">すべてのチャットを削除</a>
+            <a href="#" id="logout-link">ログアウト</a>
           </div>
         </div>
       </div>

@@ -778,7 +778,7 @@ async function summarizeSessionAsync(session) {
   const allText = (session.messages || []).map(m => m.text).join(" ");
   if (!allText) return session.title;
   
-  const prompt = `以下の会話を15文字程度で自然な要約をしてください。タイトルの前後に括弧以外の記号は入れないこと。\n${allText}`;
+  const prompt = `以下の会話を15文字程度で自然なタイトルに要約してください。タイトルの前後に記号（括弧を含む）は一切付けないでください。\n${allText}`;
   const summaryObj = await callGeminiSummary(prompt);
 
   let summary = summaryObj?.answer;
@@ -814,6 +814,21 @@ async function backupToFirebase() {
   try {
     if (currentSession && currentSession.sessionState === "active") {
       currentSession.userId = currentUser.uid;
+
+      // --- ここから追加 ---
+      // セッションが「無題」でメッセージが存在する場合、タイトルを要約する
+      if (currentSession.title === "無題" && currentSession.messages && currentSession.messages.length > 0) {
+        console.log(`アクティブセッション ${currentSession.id} が無題のため、タイトルを要約します。`);
+        const summary = await summarizeSessionAsync(currentSession);
+        if (typeof summary === "string" && summary.trim() && summary.trim() !== "無題") {
+          currentSession.title = summary.trim();
+          console.log(`セッション ${currentSession.id} のタイトルを更新しました: ${currentSession.title}`);
+          // サイドメニューも更新しておく（即時反映のため）
+          updateSideMenu(); 
+        }
+      }
+      // --- ここまで追加 ---
+
       await db.collection("chatSessions").doc(currentSession.id).set(currentSession);
       console.log(`アクティブなセッション "${currentSession.title}" (id=${currentSession.id}) のバックアップ成功 (ユーザー: ${currentUser.uid})`);
     } else {

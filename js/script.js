@@ -4,6 +4,7 @@
 let conversationSessions = []; 
 let currentSession = null;     
 let lastMessageDate = "";      
+let isDeleteMode = false; // 追加: 削除モードの状態
 
 // ==============================
 // ユーティリティ関数
@@ -361,9 +362,9 @@ async function onSendButton() {
   input.value = '';
   scrollToBottom();
 
-  if (currentSession.title === "無題" && message) {
-    currentSession.title = message.slice(0, 10) + (message.length > 10 ? "..." : "");
-  }
+  // if (currentSession.title === "無題" && message) {
+  //   currentSession.title = message.slice(0, 10) + (message.length > 10 ? "..." : "");
+  // }
 
   currentSession.messages.push({
     sender: 'User',
@@ -401,7 +402,7 @@ async function updateSideMenuFromFirebase() {
     querySnapshot.forEach(doc => {
       conversationSessions.push(doc.data());
     });
-    updateSideMenu();
+    updateSideMenu(); // 削除モードの状態に関わらず更新
 
     if (currentSession) {
       const fresh = conversationSessions.find(s => s.id === currentSession.id);
@@ -415,9 +416,16 @@ async function updateSideMenuFromFirebase() {
 }
 
 function updateSideMenu() {
-  console.log("updateSideMenu called");
+  console.log("updateSideMenu called, deleteMode=", isDeleteMode); // 削除モードの状態をログ出力
   const historyDiv = document.getElementById('conversation-history');
   historyDiv.innerHTML = "";
+
+  // 削除モードに応じてクラスをトグル
+  if (isDeleteMode) {
+    historyDiv.classList.add('delete-mode');
+  } else {
+    historyDiv.classList.remove('delete-mode');
+  }
 
   const activeSessions = currentSession ? [currentSession] : [];
 
@@ -438,20 +446,39 @@ function updateSideMenu() {
     const link = document.createElement('a');
     link.href = "#";
     link.innerText = session.title;
-    link.style.display = "block";
+    link.style.display = "block"; // block のまま
+    link.style.position = "relative"; // アイコンのposition:absolute用
     link.style.marginBottom = "5px";
-    link.style.paddingTop = "5px";
-    link.style.paddingLeft = "5px";
+    // link.style.paddingTop = "5px"; // CSSで管理するため削除
+    // link.style.paddingLeft = "5px"; // CSSで管理するため削除
+    link.style.padding = "5px 10px"; // 左右に少しパディングを追加
     link.style.textDecoration = "none";
-    link.style.color = "#FFFFFF";
+    link.style.color = "#FFFFFF"; // CSSで管理するため削除 (CSS側で!importantがあれば不要)
     if (session.id === currentSession?.id) {
-      link.style.fontWeight = "bold";
+      link.style.fontWeight = "bold"; // CSSで管理するため削除 (CSS側で管理推奨)
     }
-    link.addEventListener('click', e => {
-      e.preventDefault();
-      loadSessionById(session.id);
-      toggleSideMenu();
-    });
+
+    // 削除モードでない場合のみ、セッション読み込みのイベントリスナーを追加
+    if (!isDeleteMode) {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            loadSessionById(session.id);
+            toggleSideMenu();
+        });
+    }
+
+    // 削除モードの場合、ゴミ箱アイコンを追加
+    if (isDeleteMode) {
+      const deleteIcon = document.createElement('i');
+      deleteIcon.classList.add('bi', 'bi-trash', 'delete-thread-icon');
+      deleteIcon.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation(); // リンクのクリックイベント発火を防ぐ
+        deleteSessionById(session.id);
+      });
+      link.appendChild(deleteIcon);
+    }
+
     historyDiv.appendChild(link);
   });
 }
@@ -928,21 +955,40 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  const manualBackupBtn = document.getElementById('manual-backup-btn');
-  if (manualBackupBtn) {
-    manualBackupBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      console.log("Manual backup clicked");
-      backupToFirebase();
-    });
-  }
+  // const manualBackupBtn = document.getElementById('manual-backup-btn');
+  // if (manualBackupBtn) {
+  //   manualBackupBtn.addEventListener('click', function(e) {
+  //     e.preventDefault();
+  //     console.log("Manual backup clicked");
+  //     backupToFirebase();
+  //   });
+  // }
 
-  const deleteBtn = document.getElementById('delete-btn');
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', function(e) {
+  // const deleteBtn = document.getElementById('delete-btn');
+  // if (deleteBtn) {
+  //   deleteBtn.addEventListener('click', function(e) {
+  //     e.preventDefault();
+  //     console.log("Delete all chats clicked");
+  //     deleteLocalChats();
+  //   });
+  // }
+
+  const deleteThreadModeBtn = document.getElementById('delete-thread-mode-btn');
+  if (deleteThreadModeBtn) {
+    deleteThreadModeBtn.addEventListener('click', function(e) {
       e.preventDefault();
-      console.log("Delete all chats clicked");
-      deleteLocalChats();
+      isDeleteMode = !isDeleteMode; // 削除モードをトグル
+      console.log("Delete thread mode toggled:", isDeleteMode);
+
+      // ボタンのテキストを更新
+      this.innerText = isDeleteMode ? "削除モード解除" : "スレッドの削除";
+
+      updateSideMenu(); // サイドメニューを再描画してゴミ箱アイコンを表示/非表示
+      // ドロップダウンメニューを閉じる (オプション)
+      const footerDropdown = document.getElementById('footer-dropdown');
+      if (footerDropdown && footerDropdown.classList.contains('open')) {
+          footerDropdown.classList.remove('open');
+      }
     });
   }
 
@@ -1173,5 +1219,41 @@ function logout() {
   }).catch((error) => {
     console.error("ログアウトエラー:", error);
   });
+}
+// ===== ここまで追加 =====
+
+// ===== ここから追加 =====
+// 指定されたIDのセッションを削除する関数
+async function deleteSessionById(id) {
+  console.log("deleteSessionById called for id:", id);
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("ユーザーがログインしていません。セッションを削除できません。");
+    return;
+  }
+
+  try {
+    // Firebaseから削除
+    await db.collection("chatSessions").doc(id).delete();
+    console.log("Firebaseからセッションを削除しました:", id);
+
+    // ローカル配列から削除
+    conversationSessions = conversationSessions.filter(s => s.id !== id);
+
+    // 現在のセッションが削除された場合
+    if (currentSession && currentSession.id === id) {
+      currentSession = null;
+      document.getElementById('chatMessages').innerHTML = ""; // チャット画面をクリア
+      lastMessageDate = "";
+      console.log("現在のセッションが削除されたため、チャット画面をクリアしました。");
+    }
+
+    // サイドメニューを更新
+    updateSideMenu();
+
+  } catch (error) {
+    console.error("セッションの削除中にエラーが発生しました:", error);
+    alert("セッションの削除中にエラーが発生しました。");
+  }
 }
 // ===== ここまで追加 =====

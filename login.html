@@ -3,41 +3,92 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WORKOUT LOG ログイン</title>
+  <title>CHAT ログイン</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 
   <!-- iOS 向けホーム画面設定 -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="MyGymLog">
-  <link rel="apple-touch-icon" sizes="180x180" href="img/fudaoxiang.png">
-  <meta name="theme-color" content="#526d82">
+  <meta name="apple-mobile-web-app-title" content="CHAT">
+  <link rel="apple-touch-icon" sizes="180x180" href="img/elephant.png">
+  <meta name="theme-color" content="#f0d28c">
+
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* Use CSS variables from style.css if they were globally defined, otherwise define explicitly */
+    :root { /* Define colors based on current theme */
+      --header-bg-color: #f0d28c; /* Golden Yellow/Sand */
+      --header-text-color: #5c4033; /* Dark Brown */
+      --chat-bg-color: #fdfbf5; /* Yellowish Gray */
+      --button-bg-color: #5c4033; /* Dark Brown */
+      --button-hover-bg-color: #7a5b48; /* Slightly lighter brown */
+      --border-color: #c8ab83; /* Adjusted border color */
+      --main-text-color: #333333;
+    }
+
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+      background-color: var(--chat-bg-color); /* Match chat background */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      border-color: var(--border-color); /* Use theme border color */
+    }
+    .card-title {
+      font-family: 'Montserrat', sans-serif;
+      color: var(--header-text-color); /* Match header text color */
+    }
+    .btn-primary {
+        background-color: var(--button-bg-color); /* Match theme button color */
+        border-color: var(--button-bg-color);
+        color: #FFFFFF;
+    }
+    .btn-primary:hover {
+        background-color: var(--button-hover-bg-color); /* Use slightly lighter brown for hover */
+        border-color: var(--button-hover-bg-color);
+    }
+    .form-control:focus { /* Optional: Style form focus */
+        border-color: var(--header-bg-color);
+        box-shadow: 0 0 0 0.25rem rgba(240, 210, 140, 0.5); /* Lighter version of header bg */
+    }
+  </style>
 </head>
-<body class="bg-light">
-  <div class="container mt-5">
-    <div class="card mx-auto" style="max-width: 400px;">
-      <div class="card-body">
-        <h4 class="card-title text-center mb-4">ログイン</h4>
+<body>
+  <div class="container">
+    <div class="card mx-auto shadow-sm" style="max-width: 400px;">
+      <div class="card-body p-4">
+        <div class="text-center mb-4">
+            <img src="img/elephant.png" alt="Logo" width="50" class="mb-2">
+            <h4 class="card-title">CHAT ログイン</h4>
+        </div>
         <form id="loginForm">
-          <div class="form-group">
-            <label for="email">メールアドレス</label>
+          <div class="mb-3">
+            <label for="email" class="form-label">メールアドレス</label>
             <input type="email" class="form-control" id="email" placeholder="メールアドレスを入力" required>
           </div>
-          <div class="form-group">
-            <label for="password">パスワード</label>
+          <div class="mb-3">
+            <label for="password" class="form-label">パスワード</label>
             <input type="password" class="form-control" id="password" placeholder="パスワードを入力" required>
           </div>
-          <button type="submit" class="btn btn-primary btn-block">ログイン</button>
-          <div id="loginError" class="text-danger mt-2" style="display:none;"></div>
+          <button type="submit" class="btn btn-primary w-100">ログイン</button>
+          <div id="loginError" class="text-danger mt-3" style="display:none;"></div>
         </form>
       </div>
     </div>
   </div>
 
-  <!-- Bootstrap JSなど -->
-  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <!-- Bootstrap 5 JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
   <!-- Firebaseの初期化とログイン処理 -->
   <script type="module">
@@ -64,18 +115,19 @@
 
     loginForm.addEventListener("submit", (e) => {
       e.preventDefault();
+      loginError.style.display = "none"; // Reset error message
       const email = document.getElementById("email").value;
       const password = document.getElementById("password").value;
 
       signInWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
-          console.log("ログイン成功:", userCredential);
+          console.log("ログイン成功:", userCredential.user);
           window.location.href = "index.html";
         })
         .catch((error) => {
           console.error("ログインエラー:", error);
           loginError.style.display = "block";
-          loginError.textContent = "ログインに失敗しました: " + error.message;
+          loginError.textContent = "メールアドレスまたはパスワードが正しくありません。";
         });
     });
   </script>

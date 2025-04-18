@@ -5,6 +5,8 @@ let conversationSessions = [];
 let currentSession = null;     
 let lastMessageDate = "";      
 let isDeleteMode = false; // 追加: 削除モードの状態
+let recognition = null; // 追加: SpeechRecognition インスタンス
+let isRecording = false; // 追加: 録音状態フラグ
 
 // ==============================
 // ユーティリティ関数
@@ -1222,6 +1224,95 @@ document.addEventListener('DOMContentLoaded', function() {
   } else {
     console.error("Logout link not found in DOMContentLoaded");
   }
+
+  // ===== ここから追加 (音声入力) =====
+  const micBtn = document.getElementById("micBtn");
+  const chatInput = document.getElementById("chatInput");
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (SpeechRecognition && micBtn) {
+    recognition = new SpeechRecognition();
+    recognition.lang = "ja-JP"; // 言語設定 (日本語)
+    recognition.interimResults = true; // 途中結果を取得
+    recognition.continuous = false; // 単一の発話を認識
+
+    micBtn.addEventListener("click", () => {
+      if (!isRecording) {
+        try {
+          recognition.start();
+          console.log("音声認識を開始しました。");
+        } catch (error) {
+          console.error("音声認識の開始に失敗しました:", error);
+          alert("音声認識を開始できませんでした。ブラウザがマイクの使用を許可しているか確認してください。");
+        }
+      } else {
+        recognition.stop();
+        console.log("音声認識を停止しました（ユーザー操作）。");
+      }
+    });
+
+    recognition.onstart = () => {
+      isRecording = true;
+      micBtn.classList.add("recording");
+      micBtn.title = "録音中... (クリックして停止)";
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      let finalTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      // 確定した結果を入力欄に追加（既存のテキストの後ろに追加）
+      if (finalTranscript) {
+          chatInput.value += finalTranscript;
+          console.log("確定結果:", finalTranscript);
+          // 認識完了後に自動送信する場合はここで onSendButton() を呼ぶことも可能
+          // 必要であればテキストエリアのサイズ調整なども行う
+      }
+      // 途中結果を表示したい場合は、別の場所に表示するなどの工夫が必要
+      // console.log("途中結果:", interimTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      console.error("音声認識エラー:", event.error);
+      let message = "音声認識中にエラーが発生しました。";
+      if (event.error === 'no-speech') {
+          message = "音声が検出されませんでした。もう一度お試しください。";
+      } else if (event.error === 'audio-capture') {
+          message = "マイクにアクセスできませんでした。設定を確認してください。";
+      } else if (event.error === 'not-allowed') {
+          message = "マイクの使用が許可されていません。";
+      }
+      alert(message);
+      // エラー時も録音状態をリセット
+      if (isRecording) {
+        isRecording = false;
+        micBtn.classList.remove("recording");
+        micBtn.title = "音声入力";
+      }
+    };
+
+    recognition.onend = () => {
+      console.log("音声認識が終了しました。");
+      isRecording = false;
+      micBtn.classList.remove("recording");
+      micBtn.title = "音声入力";
+    };
+
+  } else {
+    console.warn("お使いのブラウザはWeb Speech APIをサポートしていません。またはマイクボタンが見つかりません。");
+    if (micBtn) {
+      micBtn.style.display = "none"; // サポートされていない場合はボタンを非表示
+    }
+  }
+  // ===== ここまで追加 (音声入力) =====
 });
 
 // ===== ここから追加 =====

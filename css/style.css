@@ -668,3 +668,33 @@ body {
 .delete-mode .delete-thread-icon {
   display: inline-block; /* 削除モード時に表示 */
 }
+
+/* 音声入力ボタン */
+.chat-input #micBtn {
+  margin-left: 8px;
+  width: 55px; /* 正方形に */
+  height: 55px;
+  border-radius: 4px;
+  border: none;
+  background-color: #ccc; /* 通常時の色 (例: グレー) */
+  color: var(--button-bg-color); /* アイコンの色はボタン背景色に合わせる */
+  padding: 0; /* パディング除去 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.chat-input #micBtn.recording {
+  background-color: #ff6961; /* 録音中の色 (例: 赤系) */
+  color: #FFFFFF; /* 録音中のアイコンの色 */
+}
+
+.chat-input #micBtn i {
+  font-size: 1.2rem; 
+}
+
+.chat-input button i {
+  font-size: 1.2rem; /* 例：1.5rem など、好みの大きさに変更 */
+}

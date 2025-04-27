@@ -1381,23 +1381,39 @@ function initializeSpeechRecognition() {
         };
 
         recognition.onresult = (event) => {
+            // ★デバッグログ追加
+            console.log("Speech recognition 'onresult' event fired:", event);
+
             let interimTranscript = "";
             let finalTranscript = "";
 
             for (let i = event.resultIndex; i < event.results.length; ++i) {
+                // ★デバッグログ追加
+                console.log(`Result ${i}: isFinal=${event.results[i].isFinal}, transcript='${event.results[i][0].transcript}'`);
+
                 if (event.results[i].isFinal) {
                     finalTranscript += event.results[i][0].transcript;
                 } else {
                     interimTranscript += event.results[i][0].transcript;
                 }
             }
+            
+            // ★デバッグログ追加
+            console.log("Interim Transcript:", interimTranscript);
+            console.log("Final Transcript:", finalTranscript);
 
+            // 確定した結果を入力欄に追加（既存のテキストの後ろに追加）
             if (finalTranscript) {
-                chatInput.value += finalTranscript;
-                console.log("確定結果:", finalTranscript);
-                // 必要に応じてテキストエリアのサイズ調整など
+                 // ★ chatInput が正しく参照できているか確認 ★
+                const chatInput = document.getElementById("chatInput"); 
+                if (chatInput) {
+                    chatInput.value += finalTranscript;
+                    console.log(`Appended final transcript to chatInput. New value: '${chatInput.value}'`);
+                    // 必要に応じてテキストエリアのサイズ調整など
+                } else {
+                     console.error("chatInput element not found in onresult handler!");
+                }
             }
-            // console.log("途中結果:", interimTranscript);
         };
 
         recognition.onerror = (event) => {

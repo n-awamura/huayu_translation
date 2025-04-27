@@ -7,6 +7,7 @@ let lastMessageDate = "";
 let isDeleteMode = false; // 追加: 削除モードの状態
 let recognition = null; // 追加: SpeechRecognition インスタンス
 let isRecording = false; // 追加: 録音状態フラグ
+let isCreatingNewSession = false; // ★ New Chat 連打防止フラグ
 
 // ==============================
 // ユーティリティ関数
@@ -111,9 +112,13 @@ function processMarkdownSegment(segment) {
 }
 
 
-function addMessageRow(text, sender, timestamp = null) {
-    console.log("--- addMessageRow Start (Corrected Code Block Handling) ---");
+function addMessageRow(text, sender, timestamp = null, sources = null) {
+    console.log("--- addMessageRow Start (Grounding Enabled, Sources Hidden) ---");
     console.log("Original Text:", text);
+    // sources はコンソールにはログ出力するが、表示しない
+    if (sources) {
+        console.log("Received Sources (Hidden from UI):", sources);
+    }
 
     const chatMessagesDiv = document.getElementById('chatMessages');
     const messageDate = timestamp ? new Date(timestamp) : new Date();
@@ -246,8 +251,8 @@ function addMessageRow(text, sender, timestamp = null) {
     bubble.appendChild(bubbleTime); // Timestamp inside bubble
     console.log("Appended text, copy button, and timestamp to bubble.");
 
-    // Append bubble to row
-    row.appendChild(bubble);
+    // Append bubble to row (grounding の後に追加するように変更)
+    row.appendChild(bubble); 
 
     // Append row to chat messages
     chatMessagesDiv.appendChild(row);
@@ -352,21 +357,17 @@ async function onSendButton() {
 
   if (!currentSession) {
     console.log("現在のセッションが存在しないため、新規セッションを作成します。");
-    createNewSession();
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await createNewSession();
   }
   else if (currentSession.sessionState !== "active") {
     console.log("終了済みセッションを再利用するため、active に切り替えます。");
     currentSession.sessionState = "active";
+    currentSession.updatedAt = new Date().toISOString();
   }
 
   addMessageRow(message, 'self');
   input.value = '';
   scrollToBottom();
-
-  // if (currentSession.title === "無題" && message) {
-  //   currentSession.title = message.slice(0, 10) + (message.length > 10 ? "..." : "");
-  // }
 
   currentSession.messages.push({
     sender: 'User',
@@ -375,9 +376,7 @@ async function onSendButton() {
   });
   currentSession.updatedAt = new Date().toISOString();
 
-  callGemini();
-
-  backupToFirebase();
+  await callGemini(message);
 }
 
 function toggleSideMenu() {
@@ -511,25 +510,40 @@ function loadSessionById(id) {
 
 async function startNewChat() {
   console.log("startNewChat called");
-
-  const activeEmptySession = conversationSessions.find(
-    s => s.sessionState === "active" && (!s.messages || s.messages.length === 0)
-  );
-
-  if (activeEmptySession) {
-    console.log("既存の空のアクティブセッションを再利用します:", activeEmptySession.id);
-    currentSession = activeEmptySession;
-    document.getElementById('chatMessages').innerHTML = "";
-    lastMessageDate = "";
-    scrollToBottom();
+  // ★ 連打防止チェック
+  if (isCreatingNewSession) {
+    console.log("Already creating a new session, ignoring click.");
     return;
   }
+  isCreatingNewSession = true; // フラグを立てる
+  showThinkingIndicator(true); // インジケーター表示
 
-  if (currentSession && currentSession.sessionState === "active") {
-    await endCurrentSession();
+  try {
+    const activeEmptySession = conversationSessions.find(
+      s => s.sessionState === "active" && (!s.messages || s.messages.length === 0)
+    );
+
+    if (activeEmptySession) {
+      console.log("既存の空のアクティブセッションを再利用します:", activeEmptySession.id);
+      currentSession = activeEmptySession;
+      document.getElementById('chatMessages').innerHTML = "";
+      lastMessageDate = "";
+      scrollToBottom();
+      return;
+    }
+
+    if (currentSession && currentSession.sessionState === "active") {
+      await endCurrentSession();
+    }
+
+    await createNewSession();
+  } catch (error) {
+    console.error("Error starting new chat:", error);
+    // エラーメッセージをユーザーに表示する処理を追加しても良い
+  } finally {
+    showThinkingIndicator(false); // インジケーター非表示
+    isCreatingNewSession = false; // フラグを下ろす
   }
-
-  createNewSession();
 }
 
 function createNewSession() {
@@ -545,235 +559,406 @@ function createNewSession() {
   }
 
   const now = new Date();
+  const firestoreTimestampNow = firebase.firestore.Timestamp.fromDate(now); 
   const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
-  const session = {
+  const sessionDataToSave = {
     id: sessionId,
     title: "無題",
     messages: [],
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
+    createdAt: firestoreTimestampNow,
+    updatedAt: firestoreTimestampNow,
     sessionState: "active",
     userId: currentUser.uid
   };
-
-  conversationSessions.push(session);
-  currentSession = session;
-
+  const localSession = { ...sessionDataToSave };
+  conversationSessions.push(localSession);
+  currentSession = localSession;
   document.getElementById('chatMessages').innerHTML = "";
   lastMessageDate = "";
 
-  db.collection("chatSessions").doc(sessionId).set(session).then(() => {
-    console.log("新規セッションをFirestoreに作成:", sessionId);
+  // ★ パスを /chatSessions/{sessionId} に変更 ★
+  db.collection("chatSessions").doc(sessionId).set(sessionDataToSave).then(() => {
+    console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
     updateSideMenu();
+  }).catch(error => {
+      console.error("新規セッションのFirestore書き込みエラー:", error);
   });
 }
 
-async function callGeminiApi(prompt, modelName, retryCount = 0) {
-  console.log("callGeminiApi called with prompt:", prompt);
+// ===== API呼び出し関数 (Model Switcher のみ) =====
+// async function callGeminiApi(...) { /* 削除 */ }
 
-  const groundingUrl = "https://gemini-grounding.fudaoxiang-gym.workers.dev";
+// Gemini Model Switcher Workerを呼び出す関数 (デフォルトモデル名を 1.5-pro に変更)
+async function callGeminiModelSwitcher(prompt, modelName = 'gemini-1.5-pro', useGrounding = false, toolName = null, retryCount = 0) {
+    const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev"; 
+    const maxRetries = 2;
 
-  try {
-    const response = await fetch(`${groundingUrl}?q=${encodeURIComponent(prompt)}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
+    try {
+        let response;
+        let requestBody;
+        let requestUrl = workerUrl;
+        let requestMethod = 'POST';
+        let headers = { 'Content-Type': 'application/json' };
 
-    if (!response.ok) {
-      if (response.status === 429 && retryCount < 3) {
-        console.warn("429 Too Many Requests. リトライ中...");
-        await new Promise(r => setTimeout(r, 2000));
-        return callGeminiApi(prompt, modelName, retryCount + 1);
-      }
-      throw new Error('Network response was not ok');
+        if (useGrounding && toolName) { 
+            requestMethod = 'GET';
+            const params = new URLSearchParams({
+                q: prompt,
+                model: modelName,
+                tool: toolName 
+            });
+            requestUrl = `${workerUrl}?${params.toString()}`;
+            console.log(`[DEBUG] Grounding Request - URL: ${requestUrl}`);
+            headers = {};
+            requestBody = undefined;
+        } else {
+            requestMethod = 'POST';
+            // ★ Workerに渡すモデル名を引数で受け取ったものに固定 ★
+            requestBody = JSON.stringify({ prompt: prompt, modelName: modelName }); 
+            console.log(`[DEBUG] Normal Request - URL: ${requestUrl}, Model: ${modelName}, Body: ${requestBody}`);
+        }
+
+        console.log(`[DEBUG] Sending request to Worker:`, {
+             url: requestUrl,
+             method: requestMethod,
+             headers: headers,
+             body: (requestMethod === 'GET') ? '(GET request has no body)' : requestBody
+         });
+
+        response = await fetch(requestUrl, {
+            method: requestMethod,
+            headers: headers,
+            body: requestBody
+        });
+
+        if (!response.ok) {
+             const errorText = await response.text();
+            console.error(`Worker Error (${response.status}): ${errorText}`);
+            let errorMessage = `Worker request failed with status ${response.status}`;
+            try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.error) errorMessage += `: ${errorJson.error}`;
+            } catch (e) { /* ignore */ }
+            throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        console.log("[DEBUG] Received data from Worker:", JSON.stringify(data, null, 2));
+
+        if (data && data.answer !== undefined) {
+            return data;
+        } else {
+            console.error("Unexpected response format from worker (expected { answer: ..., sources?: ... }):", data);
+            throw new Error("Invalid response format from worker.");
+        }
+
+    } catch (error) {
+        console.error(`Error calling Gemini Model Switcher (Attempt ${retryCount + 1}):`, error);
+        if (retryCount < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+            return callGeminiModelSwitcher(prompt, modelName, useGrounding, toolName, retryCount + 1); 
+        } else {
+             throw error;
+        }
     }
-
-    const resJson = await response.json();
-    if (resJson && resJson.answer) {
-      console.log("Grounding Gemini response:", resJson);
-      return {
-        answer: resJson.answer.trim(),
-        sources: resJson.sources || []
-      };
-    } else {
-      console.error("Grounding Gemini APIからの回答がありませんでした。");
-      return null;
-    }
-  } catch (error) {
-    console.error("callGeminiApiエラー:", error);
-    return null;
-  }
-}
-
-async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.0-flash', retryCount = 0) {
-  const modelSwitcherUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
-  const payload = {
-    prompt: prompt,
-    model: modelName
-  };
-
-  try {
-    const response = await fetch(modelSwitcherUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      if (response.status === 429 && retryCount < 3) {
-        console.warn("429 Too Many Requests. リトライ中...");
-        await new Promise(r => setTimeout(r, 2000));
-        return callGeminiModelSwitcher(prompt, modelName, retryCount + 1);
-      }
-      throw new Error('Network response was not ok');
-    }
-
-    const resJson = await response.json();
-    if (resJson && resJson.result) {
-      console.log("Model Switcher response:", resJson.result);
-      return { answer: resJson.result.trim(), sources: [] };
-    } else {
-      console.error("Model Switcherからの回答がありませんでした。");
-      return null;
-    }
-  } catch (error) {
-    console.error("callGeminiModelSwitcherエラー:", error);
-    return null;
-  }
 }
 
 async function callGeminiSummary(prompt, retryCount = 0) {
-  return await callGeminiModelSwitcher(prompt, retryCount);
+  return await callGeminiModelSwitcher(prompt, 'gemini-1.5-flash', retryCount);
 }
 
-async function callGemini() {
-  console.log("callGemini called");
-  
-  const chatMessagesDiv = document.getElementById('chatMessages');
-  
-  const delayTime = 6000;
-  let loadingRow = null;
-  let loadingText = null;
-  const updateTimeout = setTimeout(() => {
-    loadingRow = document.createElement('div');
-    loadingRow.classList.add('message-row', 'other');
-    
-    const elephantIcon = document.createElement('img');
-    elephantIcon.classList.add('icon');
-    elephantIcon.src = 'img/elephant.png';
-    elephantIcon.alt = '象アイコン';
-    loadingRow.appendChild(elephantIcon);
-    
-    const bubble = document.createElement('div');
-    bubble.classList.add('bubble');
-    
-    loadingText = document.createElement('div');
-    loadingText.classList.add('bubble-text', 'blinking-text');
-    loadingText.innerText = "考え中だゾウ...";
-    bubble.appendChild(loadingText);
-    
-    loadingRow.appendChild(bubble);
-    chatMessagesDiv.appendChild(loadingRow);
-    scrollToBottom();
-  }, delayTime);
-  
-  const history = buildPromptFromHistory();
-  const lastUserMessage = currentSession.messages.slice().reverse().find(m => m.sender === "User");
-  const userInput = lastUserMessage ? lastUserMessage.text : "";
+// ===== メインの Gemini 呼び出し関数 =====
+async function callGemini(userInput) {
+    // showThinkingIndicator(true); // ← 既存の静的インジケーターは一旦コメントアウトするか、併用を検討
 
-  let promptToSend = "";
-  let skipRefinement = false;
+    const modelSelect = document.getElementById('model-select');
+    const selectedModelValue = modelSelect.value;
+    const isGroundingModel = (selectedModelValue === 'gemini-1.5-pro' || selectedModelValue === 'gemini-2.0-flash');
+    const isTaiwanMode = (selectedModelValue === 'gemini-1.5-pro-tw');
 
-  if (!userInput) {
-    clearTimeout(updateTimeout);
-    return;
-  }
+    // ★ 考え中メッセージ表示の準備 (old.js から移植) ★
+    const chatMessagesDiv = document.getElementById('chatMessages');
+    const delayTime = 3000; // 3秒後に表示（6秒は少し長いかもしれないので調整）
+    let loadingRow = null;
+    let loadingText = null;
+    const updateTimeout = setTimeout(() => {
+        // 他のメッセージがまだなければインジケーターを追加
+        // (既に他のメッセージがあれば、すぐに応答が返ると期待し、ちらつき防止のため追加しないことも検討)
+        // もしくは、常に最後に追加するようにする
+        loadingRow = document.createElement('div');
+        loadingRow.classList.add('message-row', 'other');
 
-  const modeSelect = document.getElementById('model-select');
-  const selectedMode = modeSelect ? modeSelect.value : 'normal';
-  console.log("Selected Mode:", selectedMode);
+        const elephantIcon = document.createElement('img');
+        elephantIcon.classList.add('icon');
+        elephantIcon.src = 'img/elephant.png';
+        elephantIcon.alt = '象アイコン';
+        loadingRow.appendChild(elephantIcon);
 
-  if (selectedMode === 'taiwan-mandarin') {
-    promptToSend = `「${userInput}」を台湾華語に訳してください。`;
-    console.log("Taiwan Mandarin Mode - Prompt:", promptToSend);
-  } else if (selectedMode === 'research') {
-    promptToSend = userInput;
-    console.log("Research Mode - Prompt (using user input):", promptToSend);
-  } else {
-    promptToSend = userInput;
-    console.log("Normal Mode - Prompt:", promptToSend);
-  }
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
 
-  // ★ モードに応じて呼び出すAPIを分岐
-  let response = null;
-  if (selectedMode === 'research') {
-    console.log("Calling Gemini Model Switcher (for Pro model)...");
-    response = await callGeminiModelSwitcher(promptToSend, 'gemini-2.5-pro-exp-03-25');
-  } else {
-    console.log("Calling Gemini API (Grounding - Flash model)...");
-    // ★ 他のモードでは既存の callGeminiApi を使用
-    response = await callGeminiApi(promptToSend, "gemini-1.5-pro"); // モデル名は現状維持 (必要なら調整)
-  }
+        loadingText = document.createElement('div');
+        loadingText.classList.add('bubble-text', 'blinking-text');
+        loadingText.innerText = "考え中だゾウ...";
+        bubble.appendChild(loadingText);
 
-  // ★ response のチェックは共通
-  if (!response || !response.answer) {
-    clearTimeout(updateTimeout);
-    if (loadingRow && loadingText) {
-      loadingText.innerText = "回答が得られませんでした";
-      setTimeout(() => loadingRow.remove(), 3000);
-    }
-    return;
-  }
-  
-  let finalAnswer = response.answer;
-  if (!skipRefinement) {
-    const refinementPrompt = `次の回答を元に、会話の流れを参考にして語尾を「だゾウ」に変えて、自然な日本語にしてください。
+        loadingRow.appendChild(bubble);
+        chatMessagesDiv.appendChild(loadingRow);
+        scrollToBottom();
+        console.log("Displayed '考え中だゾウ...' message.");
+    }, delayTime);
+    // ★ ここまで追加 ★
 
-【元の回答】
-${response.answer}
+    try {
+        let targetModelForFirstCall = selectedModelValue;
+        let promptToSendForFirstCall = "";
+        let useGroundingForFirstCall = false;
+        let toolNameForGrounding = null;
 
-【会話履歴（参考）】
-${history}`;
-    console.log("Generating refinement prompt...");
-    const refined = await callGeminiApi(refinementPrompt, "gemini-1.5-pro");
-    finalAnswer = refined?.answer || response.answer;
-  } else {
-    console.log("Skipping refinement prompt.");
-  }
-  
-  clearTimeout(updateTimeout);
-  
-  if (!loadingRow) {
-    addMessageRow(finalAnswer, 'other');
-  } else {
-    loadingText.classList.remove('blinking-text');
-    loadingText.innerText = finalAnswer;
+        console.log(`callGemini called`);
+        console.log(`Selected Model Value: ${selectedModelValue}`);
+        console.log(`Is Taiwan Mode?: ${isTaiwanMode}`);
+        console.log(`Is Grounding Model?: ${isGroundingModel}`);
 
-    const existingBubble = loadingRow.querySelector('.bubble');
-    if (existingBubble) {
-        const existingTime = existingBubble.querySelector('.bubble-time');
-        if (existingTime) existingTime.remove();
+        // ★ モードに応じてパラメータを設定 ★
+        if (isTaiwanMode) {
+            // 台湾華語モード (第1段階: 翻訳のみ)
+            targetModelForFirstCall = 'gemini-1.5-pro';
+            promptToSendForFirstCall = `「${userInput}」を台湾で使われる繁体字中国語（台湾華語）に自然に訳してください。`;
+            useGroundingForFirstCall = false;
+            toolNameForGrounding = null;
+            console.log(`Taiwan Mode - Translation Prompt: ${promptToSendForFirstCall}`);
+        } else if (isGroundingModel) {
+             // --- Grounding モデルの場合 (ノーマル または じっくり) ---
+             promptToSendForFirstCall = buildPromptFromHistory();
+             useGroundingForFirstCall = true;
+             // ★ 選択された値に応じてモデルとツールを決定 ★
+             if (selectedModelValue === 'gemini-1.5-pro') { // じっくり
+                 targetModelForFirstCall = 'gemini-1.5-pro';
+                 toolNameForGrounding = 'googleSearchRetrieval';
+                 console.log(`Grounding Mode (1.5 Pro / じっくり) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
+             } else { // ノーマル (gemini-2.0-flash)
+                 targetModelForFirstCall = 'gemini-2.0-flash'; // value から -grounding を除く
+                 toolNameForGrounding = 'googleSearch';
+                 console.log(`Grounding Mode (2.0 Flash / ノーマル) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
+             }
+        } else {
+             // --- Grounding でないモデル (現状ここには来ないはず) ---
+             // もし Grounding しないモードを追加する場合はここに処理を書く
+             promptToSendForFirstCall = buildPromptFromHistory();
+             targetModelForFirstCall = selectedModelValue;
+             useGroundingForFirstCall = false; 
+             toolNameForGrounding = null;
+             console.log(`Non-Grounding Mode: ${targetModelForFirstCall} - Prompt: ${promptToSendForFirstCall}`);
+        }
 
-        const finalBubbleTime = document.createElement('div');
-        finalBubbleTime.classList.add('bubble-time');
-        const finalNow = new Date();
-        const finalHours = finalNow.getHours().toString().padStart(2, '0');
-        const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
-        finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
-        existingBubble.appendChild(finalBubbleTime);
-        console.log("Added timestamp to the final message bubble (loadingRow case).");
-    }
-  }
-  scrollToBottom();
-  
-  currentSession.messages.push({
-    sender: 'Gemini',
-    text: finalAnswer,
-    timestamp: new Date(),
-    sources: response.sources || []
-  });
-  currentSession.updatedAt = new Date().toISOString();
-  backupToFirebase();
+        console.log(`[DEBUG] Checking parameters before API call: useGrounding = ${useGroundingForFirstCall}, Tool name = ${toolNameForGrounding}`);
+        console.log(`Calling Model Switcher (Initial) with model: ${targetModelForFirstCall}, grounding: ${useGroundingForFirstCall}, tool: ${toolNameForGrounding}`);
+
+        // --- API 呼び出し --- 
+        const data = await callGeminiModelSwitcher(
+            promptToSendForFirstCall,
+            targetModelForFirstCall, 
+            useGroundingForFirstCall, 
+            toolNameForGrounding
+        );
+        
+        // ★ 考え中メッセージをクリア ★
+        clearTimeout(updateTimeout);
+        // showThinkingIndicator(false); // ← 既存のインジケーターも非表示
+
+        let finalAnswer = null;
+        let finalSources = null;
+
+        if (data && data.answer !== undefined) {
+            finalAnswer = data.answer;
+            finalSources = data.sources;
+            
+            // ★ 語尾変換処理 (Refinement) を復活 ★
+            const shouldRefine = true; 
+            if (shouldRefine) {
+                 console.log(`Generating refinement prompt for: ${finalAnswer}`);
+                 // buildRefinementPrompt は originalAnswer のみ受け取るように修正した想定
+                 const refinementPrompt = await buildRefinementPrompt("語尾変更", finalAnswer); 
+                 console.log('Building refinement prompt...');
+                 const refinementModel = 'gemini-2.0-flash';
+                 console.log(`Calling Model Switcher (Refinement) with model: ${refinementModel}, grounding: false`);
+                 try {
+                     // Refinement は Grounding なしで POST
+                     const refinementData = await callGeminiModelSwitcher(refinementPrompt, refinementModel, false, null);
+                     if (refinementData && refinementData.answer) {
+                         finalAnswer = refinementData.answer; // 語尾変換後の回答で上書き
+                         console.log('Refinement successful.');
+                     } else {
+                         console.warn('Refinement failed or returned no answer, using original answer.');
+                     }
+                 } catch (refinementError) {
+                      console.error("Error during refinement call:", refinementError);
+                      console.warn("Using original answer due to refinement error.");
+                 }
+            }
+
+            // ★ AIの応答をセッションデータに追加 ★
+            currentSession.messages.push({
+                sender: 'Gemini',
+                text: finalAnswer,
+                timestamp: new Date(),
+                sources: finalSources // sources は Refinement 前のものを保持
+            });
+            currentSession.updatedAt = new Date().toISOString(); // backupでTimestampになる
+
+            // ★ 最終的な回答を表示 (考え中メッセージを更新 or 新規追加) ★
+            if (loadingRow && loadingText) {
+                console.log("Updating '考え中だゾウ...' message with final answer.");
+                loadingText.classList.remove('blinking-text');
+                // loadingText の内容を finalAnswer で更新する前に、
+                // finalAnswer を addMessageRow と同様に HTML に変換する必要がある
+                // addMessageRow のロジックを再利用するか、簡略化する
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = processMarkdownSegment(finalAnswer); // Markdown処理だけ行う
+                // コードブロックなどの処理も必要なら addMessageRow のロジックを呼ぶ
+                loadingText.innerHTML = tempDiv.innerHTML; 
+                
+                // タイムスタンプを追加 (old.js のロジック参考に)
+                const existingBubble = loadingRow.querySelector('.bubble');
+                if (existingBubble) {
+                    const existingTime = existingBubble.querySelector('.bubble-time');
+                    if (existingTime) existingTime.remove(); // 古いタイムスタンプがあれば削除
+
+                    const finalBubbleTime = document.createElement('div');
+                    finalBubbleTime.classList.add('bubble-time');
+                    const finalNow = new Date(); // 応答表示時の時刻
+                    const finalHours = finalNow.getHours().toString().padStart(2, '0');
+                    const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
+                    finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
+                    existingBubble.appendChild(finalBubbleTime);
+                    
+                    // コピーボタンも必要なら追加
+                    // ...
+                    Prism.highlightAllUnder(existingBubble); // コードハイライトも忘れずに
+                }
+            } else {
+                console.log("Adding new message row for final answer (no loading indicator was shown).");
+                addMessageRow(finalAnswer, 'other', new Date().getTime(), finalSources);
+            }
+            scrollToBottom(); // ★ 表示後にスクロール ★
+
+            // ★★★ セッションタイトル要約とバックアップを成功ブロック内に移動 ★★★
+            if (currentSession && currentSession.title === "無題") {
+                console.log("Current session is untitled, attempting to summarize...");
+                summarizeSessionAsync(currentSession).then(async (summary) => {
+                     if (summary && summary !== "無題") {
+                         currentSession.title = summary;
+                         currentSession.updatedAt = new Date().toISOString(); 
+                         console.log("Session title updated by summary:", summary);
+                         updateSideMenu();
+                         await backupToFirebase(); // タイトル更新後にバックアップ
+                     } else {
+                         await backupToFirebase(); // 要約失敗/不要でもバックアップ
+                     }
+                }).catch(async (error) => {
+                     console.error("Background session summary failed:", error);
+                     await backupToFirebase(); // 要約エラーでもバックアップ
+                });
+            } else {
+                 await backupToFirebase(); // タイトルありの場合もここでバックアップ
+            }
+            // ★★★ 移動ここまで ★★★
+
+        } else { // data が不正だった場合
+            console.error("Received null or invalid response from initial worker call.");
+            if (loadingRow && loadingText) {
+                console.log("Updating '考え中だゾウ...' message with final answer.");
+                loadingText.classList.remove('blinking-text');
+                // loadingText の内容を finalAnswer で更新する前に、
+                // finalAnswer を addMessageRow と同様に HTML に変換する必要がある
+                // addMessageRow のロジックを再利用するか、簡略化する
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = processMarkdownSegment(finalAnswer); // Markdown処理だけ行う
+                // コードブロックなどの処理も必要なら addMessageRow のロジックを呼ぶ
+                loadingText.innerHTML = tempDiv.innerHTML; 
+                
+                // タイムスタンプを追加 (old.js のロジック参考に)
+                const existingBubble = loadingRow.querySelector('.bubble');
+                if (existingBubble) {
+                    const existingTime = existingBubble.querySelector('.bubble-time');
+                    if (existingTime) existingTime.remove(); // 古いタイムスタンプがあれば削除
+
+                    const finalBubbleTime = document.createElement('div');
+                    finalBubbleTime.classList.add('bubble-time');
+                    const finalNow = new Date(); // 応答表示時の時刻
+                    const finalHours = finalNow.getHours().toString().padStart(2, '0');
+                    const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
+                    finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
+                    existingBubble.appendChild(finalBubbleTime);
+                    
+                    // コピーボタンも必要なら追加
+                    // ...
+                    Prism.highlightAllUnder(existingBubble); // コードハイライトも忘れずに
+                }
+            } else {
+                console.log("Adding new message row for final answer (no loading indicator was shown).");
+                addMessageRow(finalAnswer, 'other', new Date().getTime(), finalSources);
+            }
+            scrollToBottom(); // ★ 表示後にスクロール ★
+
+            // ★★★ セッションタイトル要約とバックアップを成功ブロック内に移動 ★★★
+            if (currentSession && currentSession.title === "無題") {
+                console.log("Current session is untitled, attempting to summarize...");
+                summarizeSessionAsync(currentSession).then(async (summary) => {
+                     if (summary && summary !== "無題") {
+                         currentSession.title = summary;
+                         currentSession.updatedAt = new Date().toISOString(); 
+                         console.log("Session title updated by summary:", summary);
+                         updateSideMenu();
+                         await backupToFirebase(); // タイトル更新後にバックアップ
+                     } else {
+                         await backupToFirebase(); // 要約失敗/不要でもバックアップ
+                     }
+                }).catch(async (error) => {
+                     console.error("Background session summary failed:", error);
+                     await backupToFirebase(); // 要約エラーでもバックアップ
+                });
+            } else {
+                 await backupToFirebase(); // タイトルありの場合もここでバックアップ
+            }
+            // ★★★ 移動ここまで ★★★
+
+            // ★★★ ここにあったタイトル要約・バックアップ処理は上記 if ブロック内に移動した ★★★
+
+        }
+
+    } catch (error) {
+        // ★ 考え中メッセージをクリア/エラー表示に更新 ★
+        clearTimeout(updateTimeout);
+        // showThinkingIndicator(false);
+        console.error("Error in callGemini:", error);
+        if (loadingRow && loadingText) {
+             loadingText.classList.remove('blinking-text');
+             loadingText.innerText = `エラーが発生しました: ${error.message}`;
+        } else {
+             addMessageRow(`エラーが発生しました: ${error.message}`, 'other');
+        }
+        // ★ エラー発生時もバックアップを試みる (エラー処理を追加) ★
+        try {
+            await backupToFirebase();
+        } catch (backupError) {
+            console.error("Backup failed after error in callGemini:", backupError);
+        }
+    } // ← この閉じ括弧が callGemini 関数の try...catch ブロック全体を閉じるもの
+} // ← この閉じ括弧が callGemini 関数自体を閉じるもの (これが不足している可能性)
+
+// ★ buildRefinementPrompt の修正 (台湾華語モードを考慮) ★
+async function buildRefinementPrompt(context, originalAnswer) {
+    console.log("Building refinement prompt...");
+    // context には、台湾華語モードの場合は翻訳結果、それ以外は会話履歴が入る想定
+    // 台湾華語モードかどうかの判定はここでは難しいので、プロンプトを汎用的にする
+    return `以下のテキストの語尾を、親しみやすいキャラクターのように「だゾウ」に変えてください。元のテキストの意味や言語（例：中国語）は維持してください。
+
+【元のテキスト】
+${originalAnswer}
+
+【修正後のテキスト】`;
 }
 
 async function summarizeSessionAsync(session) {
@@ -813,31 +998,74 @@ async function backupToFirebase() {
     console.error("ユーザーがログインしていません。バックアップできません。");
     return;
   }
+  if (!currentSession || !currentSession.id) { 
+    console.warn("バックアップするカレントセッションが存在しないか、IDがありません。");
+    return;
+  }
+
   try {
-    if (currentSession && currentSession.sessionState === "active") {
-      currentSession.userId = currentUser.uid;
+    const sessionDataToSave = { ...currentSession };
+    sessionDataToSave.userId = currentUser.uid;
+    sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
 
-      // --- ここから追加 ---
-      // セッションが「無題」でメッセージが存在する場合、タイトルを要約する
-      if (currentSession.title === "無題" && currentSession.messages && currentSession.messages.length > 0) {
-        console.log(`アクティブセッション ${currentSession.id} が無題のため、タイトルを要約します。`);
-        const summary = await summarizeSessionAsync(currentSession);
-        if (typeof summary === "string" && summary.trim() && summary.trim() !== "無題") {
-          currentSession.title = summary.trim();
-          console.log(`セッション ${currentSession.id} のタイトルを更新しました: ${currentSession.title}`);
-          // サイドメニューも更新しておく（即時反映のため）
-          updateSideMenu(); 
+    // messages 配列内の timestamp を Firestore Timestamp に変換し、sources を削除
+    if (sessionDataToSave.messages && Array.isArray(sessionDataToSave.messages)) {
+      sessionDataToSave.messages = sessionDataToSave.messages.map(msg => {
+        const newMsg = { ...msg }; // メッセージオブジェクトをコピー
+        
+        // timestamp を Firestore Timestamp に変換
+        if (newMsg.timestamp) {
+          try {
+            const date = new Date(getTimestampValue(newMsg.timestamp)); // 既存の値からDateオブジェクト作成
+            newMsg.timestamp = firebase.firestore.Timestamp.fromDate(date);
+          } catch (e) {
+            console.warn("Failed to convert timestamp for message:", msg, e);
+            // 変換に失敗した場合は元の値かnull/undefinedを設定
+            // newMsg.timestamp = null; 
+          }
+        } else {
+           newMsg.timestamp = firebase.firestore.Timestamp.now(); // timestamp がなければ現在時刻
         }
-      }
-      // --- ここまで追加 ---
-
-      await db.collection("chatSessions").doc(currentSession.id).set(currentSession);
-      console.log(`アクティブなセッション "${currentSession.title}" (id=${currentSession.id}) のバックアップ成功 (ユーザー: ${currentUser.uid})`);
-    } else {
-      console.log("バックアップするアクティブなセッションは存在しません。");
+        
+        // ★ デバッグのため sources を削除 ★
+        delete newMsg.sources;
+        
+        return newMsg;
+      });
     }
+
+    // createdAt も Firestore Timestamp に変換 (もし文字列なら)
+    if (sessionDataToSave.createdAt && typeof sessionDataToSave.createdAt === 'string') {
+        try {
+            sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(new Date(sessionDataToSave.createdAt));
+        } catch(e) {
+             console.warn("Failed to convert createdAt:", sessionDataToSave.createdAt, e);
+             // 失敗した場合は現在時刻などで代替も検討
+             sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); 
+        }
+    } else if (!sessionDataToSave.createdAt) {
+        sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); // なければ現在時刻
+    }
+
+    const sessionDocRef = db.collection("chatSessions").doc(sessionDataToSave.id);
+    
+    // ★ 整形したデータ (sessionDataToSave) を書き込む ★
+    await sessionDocRef.set(sessionDataToSave); 
+    console.log(`Session ${sessionDataToSave.id} backed up successfully (/chatSessions).`);
+
+    // 元の currentSession オブジェクトは変更しない（必要なら別途更新）
+    // 例: currentSession.updatedAt = sessionDataToSave.updatedAt; 
+    // currentSession.messages = sessionDataToSave.messages; // sourcesが消えるので注意
+
   } catch (error) {
-    console.error("バックアップエラー:", error);
+    // ★ 詳細なエラー情報をログに出力 ★
+    console.error(`バックアップエラー (Session ID: ${currentSession?.id}):`, error);
+    if (error.code) {
+      console.error(`Firestore Error Code: ${error.code}`);
+    }
+    if (error.message) {
+      console.error(`Firestore Error Message: ${error.message}`);
+    }
   }
 }
 
@@ -855,6 +1083,8 @@ async function restoreFromFirebase() {
     console.error("ユーザーがログインしていません。リストアできません。");
     return;
   }
+  console.log("Current User UID:", currentUser.uid);
+
   try {
     console.log("restoreFromFirebase called");
     const querySnapshot = await db.collection("chatSessions")
@@ -862,14 +1092,18 @@ async function restoreFromFirebase() {
                                   .get();
     conversationSessions = [];
     querySnapshot.forEach(doc => {
-      conversationSessions.push(doc.data());
+      let sessionData = doc.data();
+      // ... (Timestamp変換など)
+      conversationSessions.push(sessionData);
     });
     document.getElementById('chatMessages').innerHTML = "";
     currentSession = null;
     updateSideMenu();
-    console.log("リストア完了");
+    console.log("リストア完了 (/chatSessions)");
   } catch (error) {
     console.error("リストアエラー:", error);
+    if (error.code) { console.error(`Firestore Error Code: ${error.code}`); }
+    if (error.message) { console.error(`Firestore Error Message: ${error.message}`); }
   }
 }
 
@@ -928,392 +1162,297 @@ function setSpeechBubbleText(text) {
   adjustSpeechBubbleFontSize();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-  console.log("DOMContentLoaded event fired");
-
-  const sendBtn = document.getElementById('sendBtn');
-  if (sendBtn) {
-    sendBtn.addEventListener('click', function() {
-      console.log("Send button clicked");
-      onSendButton();
-    });
-  }
-
-  const hamburger = document.getElementById('hamburger');
-  if (hamburger) {
-    hamburger.addEventListener('click', function() {
-      console.log("Hamburger clicked");
-      toggleSideMenu();
-    });
-  }
-
-  const closeMenuBtn = document.getElementById('close-menu');
-  if (closeMenuBtn) {
-    closeMenuBtn.addEventListener('click', function() {
-      console.log("Close menu clicked");
-      toggleSideMenu();
-    });
-  }
-
-  const newChatBtn = document.getElementById('new-chat');
-  if (newChatBtn) {
-    newChatBtn.addEventListener('click', function() {
-      console.log("New chat clicked");
-      startNewChat();
-    });
-  }
-
-  const restoreBtn = document.getElementById('restore-btn');
-  if (restoreBtn) {
-    restoreBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      console.log("Restore clicked");
-      restoreFromFirebase();
-    });
-  }
-
-  // const manualBackupBtn = document.getElementById('manual-backup-btn');
-  // if (manualBackupBtn) {
-  //   manualBackupBtn.addEventListener('click', function(e) {
-  //     e.preventDefault();
-  //     console.log("Manual backup clicked");
-  //     backupToFirebase();
-  //   });
-  // }
-
-  // const deleteBtn = document.getElementById('delete-btn');
-  // if (deleteBtn) {
-  //   deleteBtn.addEventListener('click', function(e) {
-  //     e.preventDefault();
-  //     console.log("Delete all chats clicked");
-  //     deleteLocalChats();
-  //   });
-  // }
-
-  const deleteThreadModeBtn = document.getElementById('delete-thread-mode-btn');
-  if (deleteThreadModeBtn) {
-    deleteThreadModeBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      isDeleteMode = !isDeleteMode; // 削除モードをトグル
-      console.log("Delete thread mode toggled:", isDeleteMode);
-
-      // ボタンのテキストを更新
-      this.innerText = isDeleteMode ? "削除モード解除" : "スレッドの削除";
-
-      updateSideMenu(); // サイドメニューを再描画してゴミ箱アイコンを表示/非表示
-      // ドロップダウンメニューを閉じる (オプション)
-      const footerDropdown = document.getElementById('footer-dropdown');
-      if (footerDropdown && footerDropdown.classList.contains('open')) {
-          footerDropdown.classList.remove('open');
-      }
-    });
-  }
-
-  const footerDropdown = document.getElementById('footer-dropdown');
-  if (footerDropdown) {
-    footerDropdown.addEventListener('click', function(e) {
-      console.log("Footer dropdown clicked");
-      this.classList.toggle('open');
-      e.stopPropagation();
-    });
-  }
-
-  document.addEventListener('click', function handleOutsideClick(e) {
-    const sideMenu = document.getElementById('side-menu');
-    const hamburger = document.getElementById('hamburger');
-    const footerDropdown = document.getElementById('footer-dropdown');
-
-    // サイドメニューが開いていて、クリックがメニュー内でもハンバーガーでもない場合
-    if (sideMenu.classList.contains('open') && 
-        !sideMenu.contains(e.target) && 
-        !hamburger.contains(e.target)) {
-      sideMenu.classList.remove('open');
-    }
-
-    // フッターのドロップダウンが開いていて、クリックがドロップダウン内でもアイコンでもない場合
-    if (footerDropdown.classList.contains('open') && 
-        !footerDropdown.contains(e.target)) {
-      footerDropdown.classList.remove('open');
-    }
-  });
-
-  window.addEventListener('beforeunload', function() {
-    backupToFirebase();
-  });
-
-  restoreFromFirebase().then(() => {
-    updateUntitledSessions();
-    if (!conversationSessions.some(s => s.sessionState === "active")) {
-      createNewSession();
-    }
-  });
-
-  // ===============================
-  // 象の吹き出し機能
-  // ===============================
-  const elephantImg = document.getElementById("elephantImg");
-  const elephantBubble = document.getElementById("elephantBubble");
-
-  // 都市の緯度経度
-  const cities = [
-    { name: "台南", latitude: 23.1417, longitude: 120.2513 },
-    { name: "台北", latitude: 25.0330, longitude: 121.5654 },
-    { name: "台中", latitude: 24.1477, longitude: 120.6736 },
-    { name: "高雄", latitude: 22.6273, longitude: 120.3014 },
-    { name: "台東", latitude: 22.7583, longitude: 121.1444 },
-    { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
-    { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
-    { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 },
-    { name: "ニューヨーク", latitude: 40.7128, longitude: -74.0060 }
-  ];
-
-  // 方角を計算する関数
-  function calculateDirection(lat1, lon1, lat2, lon2) {
-    // 緯度経度をラジアンに変換
-    const lat1Rad = lat1 * Math.PI / 180;
-    const lon1Rad = lon1 * Math.PI / 180;
-    const lat2Rad = lat2 * Math.PI / 180;
-    const lon2Rad = lon2 * Math.PI / 180;
-    
-    // 方角を計算（度数法）
-    const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
-    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
-    let bearing = Math.atan2(y, x) * (180 / Math.PI);
-    bearing = (bearing + 360) % 360; // 0-360度に変換
-
-    // 方角を日本語の16方位に変換
-    const directions = [
-      "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
-      "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"
-    ];
-    const index = Math.round(bearing / 22.5) % 16;
-    return directions[index];
-  }
-
-  // 2点間の距離を計算する関数（Haversine formula）
-  function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // 地球の半径（km）
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c;
-    return Math.round(distance); // 整数に丸める
-  }
-
-  // ランダムな都市を選択する関数
-  function getRandomCity() {
-    const randomIndex = Math.floor(Math.random() * cities.length);
-    return cities[randomIndex];
-  }
-
-  // GPS情報を取得して選択された都市との距離と方向を計算する関数
-  function getCityInfo(city) {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject("お使いのブラウザは位置情報をサポートしていません。");
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const currentLat = position.coords.latitude;
-          const currentLon = position.coords.longitude;
-          
-          const distance = calculateDistance(
-            currentLat, currentLon, 
-            city.latitude, city.longitude
-          );
-          
-          const direction = calculateDirection(
-            currentLat, currentLon, 
-            city.latitude, city.longitude
-          );
-          
-          resolve({ city: city.name, distance, direction });
-        },
-        (error) => {
-          let errorMessage = "位置情報の取得に失敗しました。";
-          switch(error.code) {
-            case error.PERMISSION_DENIED:
-              errorMessage = "位置情報の利用が許可されていません。";
-              break;
-            case error.POSITION_UNAVAILABLE:
-              errorMessage = "位置情報を取得できませんでした。";
-              break;
-            case error.TIMEOUT:
-              errorMessage = "位置情報の取得がタイムアウトしました。";
-              break;
-          }
-          reject(errorMessage);
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-      );
-    });
-  }
-
-  if (elephantImg && elephantBubble) {
-    elephantImg.addEventListener("click", function() {
-      // 吹き出しが表示されている場合は非表示に、非表示の場合は表示する
-      if (elephantBubble.classList.contains("visible")) {
-        elephantBubble.classList.remove("visible");
-      } else {
-        // ランダムな都市を選択
-        const randomCity = getRandomCity();
-        
-        // 位置情報を取得して選択された都市との距離と方向を計算
-        getCityInfo(randomCity)
-          .then(info => {
-            // 吹き出しの内容を設定
-            setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`);
-            
-            // 6秒後に吹き出しを非表示にする
-            setTimeout(() => {
-              elephantBubble.classList.remove("visible");
-            }, 6000);
-          })
-          .catch(error => {
-            // エラーメッセージを表示
-            setSpeechBubbleText(error);
-            
-            // 6秒後に吹き出しを非表示にする
-            setTimeout(() => {
-              elephantBubble.classList.remove("visible");
-            }, 6000);
-          });
-      }
-    });
-  }
-
-  // ウィンドウのリサイズ時にフォントサイズを再調整
-  window.addEventListener('resize', adjustSpeechBubbleFontSize);
-
-  // 認証状態の監視とUI更新 (単一ユーザー前提)
-  firebase.auth().onAuthStateChanged((user) => {
-    const userEmailSpan = document.getElementById('user-email');
-    if (user) {
-      console.log("ログイン中のユーザー:", user.email);
-      if (userEmailSpan) {
-        userEmailSpan.textContent = user.email;
-      }
-      // ログイン時にリストアなどを実行 (既存の処理があれば活かす)
-      // restoreFromFirebase(); // 必要に応じてコメント解除
-      // updateSideMenu(); // 必要に応じてコメント解除
-    } else {
-      console.log("ユーザーはログアウトしています。");
-      if (userEmailSpan) {
-        userEmailSpan.textContent = ''; // メールアドレスをクリア
-      }
-      // HTML側でも認証チェックしているので、ここでのリダイレクトは不要な場合が多い
-      // if (window.location.pathname !== '/login.html') {
-      //   window.location.href = "login.html";
-      // }
-    }
-  });
-
-  // ログアウトリンクのイベントリスナー
-  const logoutLink = document.getElementById('logout-link');
-  if (logoutLink) {
-    logoutLink.addEventListener('click', (e) => {
-      e.preventDefault(); // デフォルトのリンク動作をキャンセル
-      logout();
-    });
-  } else {
-    console.error("Logout link not found in DOMContentLoaded");
-  }
-
-  // ===== ここから追加 (音声入力) =====
-  const micBtn = document.getElementById("micBtn");
-  const chatInput = document.getElementById("chatInput");
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  if (SpeechRecognition && micBtn) {
-    recognition = new SpeechRecognition();
-    recognition.lang = "ja-JP"; // 言語設定 (日本語)
-    recognition.interimResults = true; // 途中結果を取得
-    recognition.continuous = false; // 単一の発話を認識
-
-    micBtn.addEventListener("click", () => {
-      if (!isRecording) {
-        try {
-          recognition.start();
-          console.log("音声認識を開始しました。");
-        } catch (error) {
-          console.error("音声認識の開始に失敗しました:", error);
-          alert("音声認識を開始できませんでした。ブラウザがマイクの使用を許可しているか確認してください。");
+// ★ Thinking Indicator 関数を先に定義 ★
+function showThinkingIndicator(show) {
+    const indicator = document.getElementById('thinkingIndicator');
+    if (indicator) {
+        indicator.style.display = show ? 'flex' : 'none'; // display: flex で表示
+        if (show) {
+            // インジケーター表示時に最下部にスクロール
+            scrollToBottom(); 
         }
-      } else {
-        recognition.stop();
-        console.log("音声認識を停止しました（ユーザー操作）。");
-      }
-    });
+    }
+}
 
-    recognition.onstart = () => {
-      isRecording = true;
-      micBtn.classList.add("recording");
-      micBtn.title = "録音中... (クリックして停止)";
+// ==============================
+// イベントリスナーと初期化
+// ==============================
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("DOMContentLoaded event fired");
+
+    // FirebaseUIの設定
+    const uiConfig = {
+        signInSuccessUrl: './', // ログイン成功後のリダイレクト先
+        signInOptions: [
+            firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+            // 必要なら他のプロバイダも追加
+            // firebase.auth.EmailAuthProvider.PROVIDER_ID,
+        ],
+        tosUrl: null, // 利用規約URL (任意)
+        privacyPolicyUrl: null // プライバシーポリシーURL (任意)
     };
+    const ui = new firebaseui.auth.AuthUI(firebase.auth());
 
-    recognition.onresult = (event) => {
-      let interimTranscript = "";
-      let finalTranscript = "";
+    // 認証状態の監視
+    firebase.auth().onAuthStateChanged(async (user) => {
+        const loginContainer = document.getElementById('firebaseui-auth-container');
+        const mainContent = document.querySelector('.chat-container'); // メインコンテンツを選択
+        const headerControls = document.querySelector('#main-header .header-controls');
+        const sideMenu = document.getElementById('side-menu');
 
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
+        if (user) {
+            console.log("ログイン中のユーザー:", user.email);
+            if (loginContainer) loginContainer.style.display = 'none';
+            if (mainContent) mainContent.style.display = 'flex'; // flex に戻す
+            if (headerControls) headerControls.style.display = 'flex';
+            if (sideMenu) sideMenu.style.display = 'flex'; // サイドメニューも表示
+            document.getElementById('user-email').textContent = user.email; // メールアドレス表示
+
+            // ★★★ 認証後に初期化処理を実行 ★★★
+            try {
+                showThinkingIndicator(true);
+                await restoreFromFirebase(); // データをリストア
+                updateSideMenuFromFirebase(); // サイドメニュー更新
+                await updateUntitledSessions(); // 未タイトルのセッションを更新
+
+                // リストア後に現在のセッションがない場合のみ新規作成
+                if (!currentSession) {
+                    console.log("No current session after restore, creating new one.");
+                    await createNewSession(); // 新規セッションを作成
+                }
+                showThinkingIndicator(false);
+            } catch (error) {
+                console.error("Initialization error after login:", error);
+                showThinkingIndicator(false);
+                 // エラーが発生してもUIは表示されたままにする
+                 if (!currentSession) {
+                     // フォールバックとして空の新規セッションを試みる
+                     try {
+                         await createNewSession();
+                     } catch (fallbackError) {
+                         console.error("Fallback createNewSession failed:", fallbackError);
+                         // ここでさらにエラー処理が必要なら追加
+                     }
+                 }
+            }
+            // ★★★ 初期化処理ここまで ★★★
+
         } else {
-          interimTranscript += event.results[i][0].transcript;
+            console.log("ユーザーはログアウトしています");
+            if (loginContainer) loginContainer.style.display = 'block';
+            if (mainContent) mainContent.style.display = 'none';
+            if (headerControls) headerControls.style.display = 'none';
+            if (sideMenu) sideMenu.style.display = 'none'; // サイドメニューも非表示
+            ui.start('#firebaseui-auth-container', uiConfig);
+            conversationSessions = [];
+            currentSession = null;
+            updateSideMenu(); // サイドメニューをクリア
         }
-      }
+    });
 
-      // 確定した結果を入力欄に追加（既存のテキストの後ろに追加）
-      if (finalTranscript) {
-          chatInput.value += finalTranscript;
-          console.log("確定結果:", finalTranscript);
-          // 認識完了後に自動送信する場合はここで onSendButton() を呼ぶことも可能
-          // 必要であればテキストエリアのサイズ調整なども行う
-      }
-      // 途中結果を表示したい場合は、別の場所に表示するなどの工夫が必要
-      // console.log("途中結果:", interimTranscript);
-    };
+    // --- DOMContentLoaded 内の他のリスナー設定 (ID修正) ---
+    // ★ IDを index.html に合わせる ★
+    const sendButton = document.getElementById('sendBtn'); 
+    const chatInput = document.getElementById('chatInput');
+    const hamburger = document.getElementById('hamburger');
+    const closeMenu = document.getElementById('close-menu');
+    const newChat = document.getElementById('new-chat');
+    const modelSelect = document.getElementById('model-select'); 
+    const dropdownToggle = document.getElementById('dropdown-toggle'); // ★ index.html に ID 追加が必要 ★
+    const deleteToggle = document.getElementById('delete-thread-mode-btn'); 
+    const logoutLink = document.getElementById('logout-link');
+    const micBtn = document.getElementById('micBtn');
 
-    recognition.onerror = (event) => {
-      console.error("音声認識エラー:", event.error);
-      let message = "音声認識中にエラーが発生しました。";
-      if (event.error === 'no-speech') {
-          message = "音声が検出されませんでした。もう一度お試しください。";
-      } else if (event.error === 'audio-capture') {
-          message = "マイクにアクセスできませんでした。設定を確認してください。";
-      } else if (event.error === 'not-allowed') {
-          message = "マイクの使用が許可されていません。";
-      }
-      alert(message);
-      // エラー時も録音状態をリセット
-      if (isRecording) {
-        isRecording = false;
-        micBtn.classList.remove("recording");
-        micBtn.title = "音声入力";
-      }
-    };
-
-    recognition.onend = () => {
-      console.log("音声認識が終了しました。");
-      isRecording = false;
-      micBtn.classList.remove("recording");
-      micBtn.title = "音声入力";
-    };
-
-  } else {
-    console.warn("お使いのブラウザはWeb Speech APIをサポートしていません。またはマイクボタンが見つかりません。");
+    // イベントリスナーを追加 (null チェックを追加してより安全に)
+    if (sendButton) sendButton.addEventListener('click', onSendButton);
+    if (chatInput) chatInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            onSendButton();
+        }
+    });
+    if (hamburger) hamburger.addEventListener('click', toggleSideMenu);
+    if (closeMenu) closeMenu.addEventListener('click', toggleSideMenu);
+    if (newChat) newChat.addEventListener('click', startNewChat);
+    if (modelSelect) modelSelect.addEventListener('change', () => {
+        console.log(`Model changed to: ${modelSelect.value}`);
+        // 必要であればモデル変更時の処理を追加
+    });
+    if (dropdownToggle) dropdownToggle.addEventListener('click', (e) => { // ★ null チェック追加 ★
+        e.stopPropagation(); // Prevent body click handler from closing immediately
+        // ★ querySelector を使って親の .dropdown を探す方が確実かもしれない ★
+        const dropdownMenu = document.getElementById('dropdown-content'); 
+        const parentDropdown = dropdownMenu ? dropdownMenu.closest('.dropdown') : null;
+        if(parentDropdown) {
+            parentDropdown.classList.toggle('open');
+        }
+        // document.getElementById('menu-footer').querySelector('.dropdown').classList.toggle('open'); // 古いセレクタ
+    });
+     // Add event listener for delete toggle
+     if (deleteToggle) deleteToggle.addEventListener('click', (e) => { // ★ null チェック追加 ★
+        e.preventDefault();
+        isDeleteMode = !isDeleteMode;
+        // ★ textContent ではなく innerHTML を使ってアイコンを含めるか、アイコン要素を別途操作 ★
+        // deleteToggle.textContent = isDeleteMode ? '🗑️ 削除モード (完了)' : '🗑️ スレッド削除';
+        deleteToggle.innerHTML = isDeleteMode ? '<i class="bi bi-check-circle-fill"></i> 削除モード (完了)' : '<i class="bi bi-trash"></i> スレッド削除'; // アイコンも変更する例
+        updateSideMenu(); // Update display of delete icons
+        // Close dropdown after selection
+        const parentDropdown = deleteToggle.closest('.dropdown');
+        if (parentDropdown) {
+             parentDropdown.classList.remove('open');
+        }
+    });
+    if (logoutLink) logoutLink.addEventListener('click', logout);
+    // Mic button listener (null チェックは既存のコードにある想定)
     if (micBtn) {
-      micBtn.style.display = "none"; // サポートされていない場合はボタンを非表示
+        // ★ toggleRecording を呼び出すように修正/確認 ★
+        micBtn.addEventListener('click', toggleRecording);
+    } else {
+        console.warn("Mic button (#micBtn) not found.");
     }
-  }
-  // ===== ここまで追加 (音声入力) =====
+
+    // Outside click closes dropdown
+    document.addEventListener('click', function handleOutsideClick(e) {
+        const dropdown = document.getElementById('menu-footer')?.querySelector('.dropdown.open'); // 開いているドロップダウンを取得
+        // クリックされた場所がドロップダウンの外であるか確認 (トグルボタンも除外)
+        if (dropdown && !dropdown.contains(e.target) && !document.getElementById('dropdown-toggle')?.contains(e.target)) {
+            dropdown.classList.remove('open');
+        }
+    });
+
+    // Initialize speech recognition (if available)
+    // ★ 確実に呼び出されるようにする ★
+    initializeSpeechRecognition();
+
+    // --- 象の画像クリックイベントリスナー (old.js から移植) ---
+    const elephantImg = document.getElementById("elephantImg");
+    const elephantBubble = document.getElementById("elephantBubble");
+
+    if (elephantImg && elephantBubble) {
+      elephantImg.addEventListener("click", function() {
+        if (elephantBubble.classList.contains("visible")) {
+          elephantBubble.classList.remove("visible");
+        } else {
+          const randomCity = getRandomCity();
+          setSpeechBubbleText("位置情報取得中..."); // 一時的なメッセージ (既存の関数を利用)
+          getCityInfo(randomCity)
+            .then(info => {
+              setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`); // 既存の関数を利用
+              setTimeout(() => {
+                elephantBubble.classList.remove("visible");
+              }, 6000);
+            })
+            .catch(error => {
+              setSpeechBubbleText(error); // エラーメッセージを表示 (既存の関数を利用)
+              setTimeout(() => {
+                elephantBubble.classList.remove("visible");
+              }, 6000);
+            });
+        }
+      });
+
+      // ウィンドウのリサイズ時にフォントサイズを再調整するリスナーは既存のものを利用 or 必要なら追加
+      // window.addEventListener('resize', adjustSpeechBubbleFontSize);
+    }
+
 });
+
+// ===== 音声認識関連 =====
+
+// ★ initializeSpeechRecognition の実装 (old.js から移植) ★
+function initializeSpeechRecognition() {
+    console.log("initializeSpeechRecognition called");
+    const micBtn = document.getElementById("micBtn");
+    const chatInput = document.getElementById("chatInput");
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition && micBtn) {
+        recognition = new SpeechRecognition();
+        recognition.lang = "ja-JP";
+        recognition.interimResults = true;
+        recognition.continuous = false;
+
+        recognition.onstart = () => {
+            isRecording = true;
+            micBtn.classList.add("recording");
+            micBtn.title = "録音中... (クリックして停止)";
+            console.log("音声認識を開始しました。");
+        };
+
+        recognition.onresult = (event) => {
+            let interimTranscript = "";
+            let finalTranscript = "";
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+
+            if (finalTranscript) {
+                chatInput.value += finalTranscript;
+                console.log("確定結果:", finalTranscript);
+                // 必要に応じてテキストエリアのサイズ調整など
+            }
+            // console.log("途中結果:", interimTranscript);
+        };
+
+        recognition.onerror = (event) => {
+            console.error("音声認識エラー:", event.error);
+            let message = "音声認識中にエラーが発生しました。";
+            if (event.error === 'no-speech') {
+                message = "音声が検出されませんでした。もう一度お試しください。";
+            } else if (event.error === 'audio-capture') {
+                message = "マイクにアクセスできませんでした。設定を確認してください。";
+            } else if (event.error === 'not-allowed') {
+                message = "マイクの使用が許可されていません。";
+            }
+            alert(message);
+            if (isRecording) {
+                isRecording = false;
+                micBtn.classList.remove("recording");
+                micBtn.title = "音声入力";
+            }
+        };
+
+        recognition.onend = () => {
+            console.log("音声認識が終了しました。");
+            isRecording = false;
+            micBtn.classList.remove("recording");
+            micBtn.title = "音声入力";
+        };
+
+    } else {
+        console.warn("お使いのブラウザはWeb Speech APIをサポートしていません。またはマイクボタンが見つかりません。");
+        if (micBtn) {
+            micBtn.style.display = "none";
+        }
+    }
+}
+
+// ★ toggleRecording の実装 (old.js から移植) ★
+function toggleRecording() {
+    console.log("toggleRecording called");
+    if (!recognition) {
+        console.error("SpeechRecognitionが初期化されていません。");
+        return;
+    }
+    if (!isRecording) {
+        try {
+            recognition.start();
+            // onstart でログ出力するためここでは省略
+        } catch (error) {
+            console.error("音声認識の開始に失敗しました:", error);
+            alert("音声認識を開始できませんでした。ブラウザがマイクの使用を許可しているか確認してください。");
+        }
+    } else {
+        recognition.stop();
+        // onend でログ出力するためここでは省略
+    }
+}
 
 // ===== ここから追加 =====
 // ログアウト関数
@@ -1339,9 +1478,9 @@ async function deleteSessionById(id) {
   }
 
   try {
-    // Firebaseから削除
+    // ★ パスを /chatSessions/{sessionId} に変更 ★
     await db.collection("chatSessions").doc(id).delete();
-    console.log("Firebaseからセッションを削除しました:", id);
+    console.log("Firebaseからセッションを削除しました (/chatSessions):", id);
 
     // ローカル配列から削除
     conversationSessions = conversationSessions.filter(s => s.id !== id);
@@ -1363,3 +1502,100 @@ async function deleteSessionById(id) {
   }
 }
 // ===== ここまで追加 =====
+
+// ===== サイドメニュー外クリックで閉じる処理 =====
+document.addEventListener('click', function handleOutsideClick(e) {
+    const sideMenu = document.getElementById('side-menu');
+    const hamburgerIcon = document.getElementById('hamburger'); // メニューを開くボタン
+
+    // メニューが開いているか確認
+    if (sideMenu.classList.contains('open')) {
+        // クリックがメニュー自身の上ではないか、かつ、ハンバーガーアイコンの上ではないかを確認
+        if (!sideMenu.contains(e.target) && e.target !== hamburgerIcon && !hamburgerIcon.contains(e.target)) {
+            sideMenu.classList.remove('open');
+            console.log('Clicked outside, closing side menu.');
+        }
+    }
+});
+
+// ===== 象の吹き出し関連 ヘルパー関数 =====
+
+// 都市の緯度経度 (old.js からコピー)
+const cities = [
+  { name: "台南", latitude: 23.1417, longitude: 120.2513 },
+  { name: "台北", latitude: 25.0330, longitude: 121.5654 },
+  { name: "台中", latitude: 24.1477, longitude: 120.6736 },
+  { name: "高雄", latitude: 22.6273, longitude: 120.3014 },
+  { name: "台東", latitude: 22.7583, longitude: 121.1444 },
+  { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
+  { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
+  { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 },
+  { name: "ニューヨーク", latitude: 40.7128, longitude: -74.0060 }
+];
+
+// 方角を計算する関数 (old.js からコピー)
+function calculateDirection(lat1, lon1, lat2, lon2) {
+  const lat1Rad = lat1 * Math.PI / 180;
+  const lon1Rad = lon1 * Math.PI / 180;
+  const lat2Rad = lat2 * Math.PI / 180;
+  const lon2Rad = lon2 * Math.PI / 180;
+  const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
+  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
+  let bearing = Math.atan2(y, x) * (180 / Math.PI);
+  bearing = (bearing + 360) % 360;
+  const directions = [
+    "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
+    "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"
+  ];
+  const index = Math.round(bearing / 22.5) % 16;
+  return directions[index];
+}
+
+// 2点間の距離を計算する関数 (old.js からコピー)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // 地球の半径（km）
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c;
+  return Math.round(distance);
+}
+
+// ランダムな都市を選択する関数 (old.js からコピー)
+function getRandomCity() {
+  const randomIndex = Math.floor(Math.random() * cities.length);
+  return cities[randomIndex];
+}
+
+// GPS情報を取得して選択された都市との距離と方向を計算する関数 (old.js からコピー)
+function getCityInfo(city) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject("お使いのブラウザは位置情報をサポートしていません。");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const currentLat = position.coords.latitude;
+        const currentLon = position.coords.longitude;
+        const distance = calculateDistance(currentLat, currentLon, city.latitude, city.longitude);
+        const direction = calculateDirection(currentLat, currentLon, city.latitude, city.longitude);
+        resolve({ city: city.name, distance, direction });
+      },
+      (error) => {
+        let errorMessage = "位置情報の取得に失敗しました。";
+        switch(error.code) {
+          case error.PERMISSION_DENIED: errorMessage = "位置情報の利用が許可されていません。"; break;
+          case error.POSITION_UNAVAILABLE: errorMessage = "位置情報を取得できませんでした。"; break;
+          case error.TIMEOUT: errorMessage = "位置情報の取得がタイムアウトしました。"; break;
+        }
+        reject(errorMessage);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  });
+}

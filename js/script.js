@@ -401,16 +401,65 @@ async function updateSideMenuFromFirebase() {
                                   .get();
     conversationSessions = [];
     querySnapshot.forEach(doc => {
-      conversationSessions.push(doc.data());
+      let sessionData = doc.data();
+      // --- Timestamp 変換処理を追加 ---
+      if (sessionData.createdAt && sessionData.createdAt.toDate) {
+          sessionData.createdAt = sessionData.createdAt.toDate();
+      }
+      if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
+          sessionData.updatedAt = sessionData.updatedAt.toDate();
+      }
+      if (sessionData.messages && Array.isArray(sessionData.messages)) {
+          sessionData.messages = sessionData.messages.map(msg => {
+              const localMsg = { ...msg };
+              if (localMsg.timestamp && localMsg.timestamp.toDate) {
+                  localMsg.timestamp = localMsg.timestamp.toDate();
+              }
+              // sources は Firestore に保存していないので、何もしない
+              return localMsg;
+          });
+      }
+      // --- 変換処理ここまで ---
+      conversationSessions.push(sessionData);
     });
+
+    // ★ 追加: ローカルの currentSession の方が新しければ上書き ★
+    if (currentSession) {
+        const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+        if (sessionIndex !== -1) {
+            // Firestore から取得したデータとローカルの updatedAt を比較
+            const firestoreUpdatedAt = conversationSessions[sessionIndex].updatedAt;
+            const localUpdatedAt = currentSession.updatedAt instanceof Date ? currentSession.updatedAt : new Date(currentSession.updatedAt);
+
+            // getTime() で比較するのが確実
+            if (firestoreUpdatedAt && localUpdatedAt && localUpdatedAt.getTime() > firestoreUpdatedAt.getTime()) {
+                 console.log(`Local currentSession (ID: ${currentSession.id}) is newer. Updating conversationSessions array.`);
+                 conversationSessions[sessionIndex] = { ...currentSession }; // ローカルのデータで上書き
+            } else if (!firestoreUpdatedAt && localUpdatedAt) {
+                 // Firestore に updatedAt がないがローカルにはある場合もローカル優先
+                 console.log(`Local currentSession (ID: ${currentSession.id}) has updatedAt, Firestore version doesn't. Updating conversationSessions array.`);
+                 conversationSessions[sessionIndex] = { ...currentSession };
+            }
+        } else {
+             // Firestore にデータがないがローカルには currentSession が存在する場合 (バックアップ直後など)
+             console.log(`Local currentSession (ID: ${currentSession.id}) not found in Firestore results after update. Adding it to conversationSessions array.`);
+             conversationSessions.push({ ...currentSession });
+        }
+        // ★ currentSession を再設定 (上書きや追加で参照が変わる可能性があるため) ★
+        currentSession = conversationSessions.find(s => s.id === currentSession.id);
+    }
+    // ★ 追加ここまで ★
+
     updateSideMenu(); // 削除モードの状態に関わらず更新
 
+    /* 不要になった処理 (currentSession の再検索は上記で行う)
     if (currentSession) {
       const fresh = conversationSessions.find(s => s.id === currentSession.id);
       if (fresh) {
         currentSession = fresh;
       }
     }
+    */
   } catch (error) {
     console.error("サイドメニュー更新エラー:", error);
   }
@@ -1053,9 +1102,21 @@ async function backupToFirebase() {
     await sessionDocRef.set(sessionDataToSave); 
     console.log(`Session ${sessionDataToSave.id} backed up successfully (/chatSessions).`);
 
-    // 元の currentSession オブジェクトは変更しない（必要なら別途更新）
-    // 例: currentSession.updatedAt = sessionDataToSave.updatedAt; 
-    // currentSession.messages = sessionDataToSave.messages; // sourcesが消えるので注意
+    // ★ 追加: ローカルの currentSession も更新 ★
+    if (currentSession && currentSession.id === sessionDataToSave.id) {
+        currentSession.messages = sessionDataToSave.messages.map(msg => {
+             // Firestore Timestamp を Date オブジェクトに戻す
+             const localMsg = { ...msg };
+             if (localMsg.timestamp && localMsg.timestamp.toDate) {
+                 localMsg.timestamp = localMsg.timestamp.toDate();
+             }
+             // sources は sessionDataToSave にないので、ここでは追加しない
+             return localMsg;
+         });
+        currentSession.updatedAt = sessionDataToSave.updatedAt.toDate(); // Timestamp を Date に戻す
+        console.log("Local currentSession updated after successful backup.");
+    }
+    // ★ 追加ここまで ★
 
   } catch (error) {
     // ★ 詳細なエラー情報をログに出力 ★
@@ -1093,7 +1154,24 @@ async function restoreFromFirebase() {
     conversationSessions = [];
     querySnapshot.forEach(doc => {
       let sessionData = doc.data();
-      // ... (Timestamp変換など)
+      // --- Timestamp 変換処理を追加 ---
+      if (sessionData.createdAt && sessionData.createdAt.toDate) {
+          sessionData.createdAt = sessionData.createdAt.toDate();
+      }
+      if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
+          sessionData.updatedAt = sessionData.updatedAt.toDate();
+      }
+      if (sessionData.messages && Array.isArray(sessionData.messages)) {
+          sessionData.messages = sessionData.messages.map(msg => {
+              const localMsg = { ...msg };
+              if (localMsg.timestamp && localMsg.timestamp.toDate) {
+                  localMsg.timestamp = localMsg.timestamp.toDate();
+              }
+              // sources は Firestore に保存していないので、何もしない
+              return localMsg;
+          });
+      }
+      // --- 変換処理ここまで ---
       conversationSessions.push(sessionData);
     });
     document.getElementById('chatMessages').innerHTML = "";

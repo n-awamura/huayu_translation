@@ -3,11 +3,12 @@
 // ==============================
 let conversationSessions = []; 
 let currentSession = null;     
-let lastMessageDate = "";      
+let lastHeaderDate = null;   // ★ 最後にヘッダーを表示した日付 (Date オブジェクト)
 let isDeleteMode = false; // 追加: 削除モードの状態
 let recognition = null; // 追加: SpeechRecognition インスタンス
 let isRecording = false; // 追加: 録音状態フラグ
 let isCreatingNewSession = false; // ★ New Chat 連打防止フラグ
+let firebaseUiInitialized = false; // ★ FirebaseUI 初期化済みフラグを追加 ★
 
 // ==============================
 // ユーティリティ関数
@@ -113,7 +114,7 @@ function processMarkdownSegment(segment) {
 
 
 function addMessageRow(text, sender, timestamp = null, sources = null) {
-    console.log("--- addMessageRow Start (Grounding Enabled, Sources Hidden) ---");
+    console.log("--- addMessageRow Start ---");
     console.log("Original Text:", text);
     // sources はコンソールにはログ出力するが、表示しない
     if (sources) {
@@ -121,24 +122,44 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     }
 
     const chatMessagesDiv = document.getElementById('chatMessages');
-    const messageDate = timestamp ? new Date(timestamp) : new Date();
+    const messageDate = timestamp ? new Date(timestamp) : new Date(); // ★ メッセージの日付
     const now = new Date();
 
-    // --- Date Header Logic ---
-    let dateHeaderStr;
-    if (messageDate.getFullYear() === now.getFullYear()) {
-        dateHeaderStr = `${(messageDate.getMonth() + 1).toString().padStart(2, '0')}/${messageDate.getDate().toString().padStart(2, '0')} (${getWeekday(messageDate)})`;
+    // --- Date Header Logic (最終修正) ---
+    let shouldAddHeader = false;
+    if (!lastHeaderDate || !(lastHeaderDate instanceof Date)) {
+        shouldAddHeader = true;
     } else {
-        dateHeaderStr = `${messageDate.getFullYear()}/${(messageDate.getMonth() + 1).toString().padStart(2, '0')}/${messageDate.getDate().toString().padStart(2, '0')} (${getWeekday(messageDate)})`;
-    }
-    if (dateHeaderStr !== lastMessageDate) {
-        lastMessageDate = dateHeaderStr;
-        const dateHeader = document.createElement('div');
-        dateHeader.classList.add('date-header');
-        dateHeader.innerText = dateHeaderStr;
-        chatMessagesDiv.appendChild(dateHeader);
+        if (lastHeaderDate.getFullYear() !== messageDate.getFullYear() ||
+            lastHeaderDate.getMonth() !== messageDate.getMonth() ||
+            lastHeaderDate.getDate() !== messageDate.getDate()) {
+            shouldAddHeader = true;
+        }
     }
 
+    if (shouldAddHeader) {
+        // ★ さらにチェック: 直前にヘッダーがなければ追加 ★
+        const existingHeaders = chatMessagesDiv.querySelectorAll('.date-header');
+        const lastElement = chatMessagesDiv.lastElementChild;
+        if (!lastElement || !lastElement.classList.contains('date-header')) {
+             console.log(`addMessageRow: Last element is not a header. Proceeding to add header.`);
+            let dateHeaderStr;
+            // ★ 常に MM/DD (曜日) 形式にする ★
+            dateHeaderStr = `${(messageDate.getMonth() + 1).toString().padStart(2, '0')}/${messageDate.getDate().toString().padStart(2, '0')} (${getWeekday(messageDate)})`;
+            const dateHeader = document.createElement('div');
+            dateHeader.classList.add('date-header');
+            dateHeader.innerText = dateHeaderStr;
+            chatMessagesDiv.appendChild(dateHeader);
+            console.log("Added date header (final check passed):", dateHeaderStr);
+            lastHeaderDate = messageDate; // Date オブジェクトで更新
+        } else {
+             console.log("Skipping header add because last element is already a date header.");
+             // lastHeaderDate の更新は行わない (既存のヘッダーの日付が優先されるべき)
+        }
+    } else {
+        console.log("Condition not met (date is the same). Skipping header.");
+    }
+    // --- Date Header Logic (最終修正ここまで) ---
 
     // --- Create Row and Icon ---
     const row = document.createElement('div');
@@ -542,11 +563,20 @@ function loadSessionById(id) {
 
   const chatMessagesDiv = document.getElementById('chatMessages');
   chatMessagesDiv.innerHTML = "";
-  lastMessageDate = "";
+  lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
 
   (session.messages || []).forEach(item => {
+    // ... (Timestamp 変換処理)
     if (item.timestamp && item.timestamp.seconds) {
-      item.timestamp = new Date(item.timestamp.seconds * 1000);
+        item.timestamp = new Date(item.timestamp.seconds * 1000);
+    } else if (item.timestamp && typeof item.timestamp === 'string') {
+        // 文字列形式のタイムスタンプも Date オブジェクトに変換
+        try {
+            item.timestamp = new Date(item.timestamp);
+        } catch (e) {
+            console.warn("Failed to parse timestamp string:", item.timestamp, e);
+            item.timestamp = new Date(); // パース失敗時は現在時刻など
+        }
     }
     addMessageRow(
       item.text,
@@ -576,16 +606,22 @@ async function startNewChat() {
       console.log("既存の空のアクティブセッションを再利用します:", activeEmptySession.id);
       currentSession = activeEmptySession;
       document.getElementById('chatMessages').innerHTML = "";
-      lastMessageDate = "";
+      lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
       scrollToBottom();
-      return;
+      // ★ フラグを下ろす処理が抜けていた可能性 ★
+      // showThinkingIndicator(false); // ここではない
+      // isCreatingNewSession = false;
+      return; // 再利用なのでここで終了
     }
 
+    // 既存のアクティブセッションがあれば終了させる
     if (currentSession && currentSession.sessionState === "active") {
       await endCurrentSession();
     }
 
-    await createNewSession();
+    // 新規セッションを作成
+    await createNewSession(); // この中で chatMessages クリアと lastHeaderDate リセットが行われる
+
   } catch (error) {
     console.error("Error starting new chat:", error);
     // エラーメッセージをユーザーに表示する処理を追加しても良い
@@ -595,43 +631,53 @@ async function startNewChat() {
   }
 }
 
+// createNewSession でも念のためリセット
 function createNewSession() {
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.error("ユーザーがログインしていません。セッションを作成できません。");
-    return;
-  }
+    const currentUser = firebase.auth().currentUser;
+    if (!currentUser) {
+        console.error("ユーザーがログインしていません。セッションを作成できません。");
+        return Promise.reject(new Error("User not logged in")); // ★ Promise を返すように変更 ★
+    }
 
-  if (currentSession && currentSession.sessionState === "active" && (!currentSession.messages || currentSession.messages.length === 0)) {
-    console.log("既存の空のアクティブセッションを再利用します。");
-    return;
-  }
+    // 既存の空アクティブセッションチェックは startNewChat で行うので不要
+    /*
+    if (currentSession && currentSession.sessionState === "active" && (!currentSession.messages || currentSession.messages.length === 0)) {
+        console.log("既存の空のアクティブセッションを再利用します。");
+        return Promise.resolve(); // ★ Promise を返す ★
+    }
+    */
 
-  const now = new Date();
-  const firestoreTimestampNow = firebase.firestore.Timestamp.fromDate(now); 
-  const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
-  const sessionDataToSave = {
-    id: sessionId,
-    title: "無題",
-    messages: [],
-    createdAt: firestoreTimestampNow,
-    updatedAt: firestoreTimestampNow,
-    sessionState: "active",
-    userId: currentUser.uid
-  };
-  const localSession = { ...sessionDataToSave };
-  conversationSessions.push(localSession);
-  currentSession = localSession;
-  document.getElementById('chatMessages').innerHTML = "";
-  lastMessageDate = "";
+    const now = new Date();
+    const firestoreTimestampNow = firebase.firestore.Timestamp.fromDate(now);
+    const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
+    const sessionDataToSave = {
+        id: sessionId,
+        title: "無題",
+        messages: [],
+        createdAt: firestoreTimestampNow,
+        updatedAt: firestoreTimestampNow,
+        sessionState: "active",
+        userId: currentUser.uid
+    };
+    const localSession = { ...sessionDataToSave }; // Firestore Timestamp を Date に戻す必要がある
+    localSession.createdAt = now;
+    localSession.updatedAt = now;
 
-  // ★ パスを /chatSessions/{sessionId} に変更 ★
-  db.collection("chatSessions").doc(sessionId).set(sessionDataToSave).then(() => {
-    console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
-    updateSideMenu();
-  }).catch(error => {
-      console.error("新規セッションのFirestore書き込みエラー:", error);
-  });
+    conversationSessions.push(localSession);
+    currentSession = localSession;
+    document.getElementById('chatMessages').innerHTML = "";
+    lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
+    scrollToBottom(); // スクロールも忘れずに
+
+    // ★ Firestoreへの書き込みを非同期で行い、Promise を返す ★
+    return db.collection("chatSessions").doc(sessionId).set(sessionDataToSave).then(() => {
+        console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
+        updateSideMenu();
+    }).catch(error => {
+        console.error("新規セッションのFirestore書き込みエラー:", error);
+        // エラーを呼び出し元に伝える
+        throw error;
+    });
 }
 
 // ===== API呼び出し関数 (Model Switcher のみ) =====
@@ -1256,93 +1302,370 @@ function showThinkingIndicator(show) {
 // イベントリスナーと初期化
 // ==============================
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOMContentLoaded event fired");
+// ★★★ 天気情報取得関数のコメントアウトを解除 ★★★
+async function getWeatherForCities() {
+    // ★ 関数が呼び出されたか確認するログ ★
+    console.log("getWeatherForCities function CALLED!");
+    // ★ ここから元の処理 ★
+    console.log("getWeatherForCities called");
+    const cities = ["東京", "台北", "台南", "高雄", "ホノルル"];
+    // ★ プロンプトを再調整: より強く完全なリストを要求 ★
+    const prompt = `以下の全ての都市について、今日の天気予報（天気・最高気温・最低気温）と現在の湿度を検索結果から抽出し、完全なリスト形式で**必ず**教えてください。導入文は不要です。
 
-    // FirebaseUIの設定
+- 東京
+- 台北
+- 台南
+- 高雄
+- ホノルル`;
+
+    // 考え中インジケーター表示 (callGemini から流用)
+    const chatMessagesDiv = document.getElementById('chatMessages');
+    const delayTime = 1000; // 少し短めに設定
+    let loadingRow = null;
+    let loadingText = null;
+    const updateTimeout = setTimeout(() => {
+        loadingRow = document.createElement('div');
+        loadingRow.classList.add('message-row', 'other');
+
+        const elephantIcon = document.createElement('img');
+        elephantIcon.classList.add('icon');
+        elephantIcon.src = 'img/elephant.png';
+        elephantIcon.alt = '象アイコン';
+        loadingRow.appendChild(elephantIcon);
+
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
+
+        loadingText = document.createElement('div');
+        loadingText.classList.add('bubble-text', 'blinking-text');
+        loadingText.innerText = "天気情報を取得中だゾウ...";
+        bubble.appendChild(loadingText);
+
+        loadingRow.appendChild(bubble);
+        chatMessagesDiv.appendChild(loadingRow);
+        scrollToBottom();
+        console.log("Displayed '天気情報を取得中だゾウ...' message.");
+    }, delayTime);
+
+    try {
+        // アクティブなセッションがない場合、開始を試みる
+        if (!currentSession || currentSession.sessionState !== "active") {
+             console.log("No active session or session not active. Ensuring session is active.");
+             // 既存のセッションがあればアクティブにする、なければ新規作成を試みる
+             if (currentSession) {
+                 currentSession.sessionState = "active";
+                 currentSession.updatedAt = new Date().toISOString();
+             } else {
+                 // 最後にアクティブだったセッションを探すか、新規作成
+                 const lastActiveSession = conversationSessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).find(s => s.messages?.length > 0);
+                 if(lastActiveSession) {
+                    loadSessionById(lastActiveSession.id);
+                    if(currentSession) currentSession.sessionState = "active"; // 念のため
+                 } else {
+                    await createNewSession(); // 新規作成
+                 }
+             }
+             if (!currentSession) {
+                 throw new Error("セッションを開始できませんでした。");
+             }
+             updateSideMenu(); // セッション状態が変わった可能性があるのでサイドメニュー更新
+        }
+
+        console.log(`Calling Model Switcher for weather with model: gemini-2.0-flash, grounding: true, tool: googleSearch`);
+        // Grounding を有効にしてモデルスイッチャーを呼び出す
+        const data = await callGeminiModelSwitcher(
+            prompt,
+            'gemini-2.0-flash',
+            true, // Grounding を有効化
+            'googleSearch' // 標準の Google Search ツールを使用
+        );
+
+        clearTimeout(updateTimeout);
+
+        let rawAnswer = "天気情報の取得に失敗しました。"; // ★ 変数名を変更 ★
+        let finalSources = null;
+
+        if (data && data.answer !== undefined) {
+            rawAnswer = data.answer; // ★ モデルの生応答を保持 ★
+            finalSources = data.sources;
+
+            // ★ 語尾変換処理 (Refinement) ★
+            console.log(`Generating refinement prompt for weather: ${rawAnswer}`);
+            const refinementPrompt = await buildRefinementPrompt("語尾変更", rawAnswer);
+            const refinementModel = 'gemini-2.0-flash';
+            console.log(`Calling Model Switcher (Refinement) for weather with model: ${refinementModel}`);
+            let refinedAnswer = rawAnswer; // ★ 初期値は生応答 ★
+            try {
+                const refinementData = await callGeminiModelSwitcher(refinementPrompt, refinementModel, false, null);
+                if (refinementData && refinementData.answer) {
+                    refinedAnswer = refinementData.answer; // ★ 語尾変換後の応答 ★
+                    console.log('Weather refinement successful.');
+                } else {
+                    console.warn('Weather refinement failed or returned no answer, using original answer.');
+                }
+            } catch (refinementError) {
+                 console.error("Error during weather refinement call:", refinementError);
+                 console.warn("Using original weather answer due to refinement error.");
+            }
+
+            // ★★★ 日付文字列の結合を削除 ★★★
+            // const today = new Date(); // dateString 生成は不要に
+            // const dateString = `${today.getFullYear()}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getDate().toString().padStart(2, '0')} (${getWeekday(today)}) の天気だゾウ！`;
+            // const finalAnswerWithDate = `${dateString}\n\n${refinedAnswer}`; // ★ この行を削除/コメントアウト ★
+            // ★★★ 日付結合削除ここまで ★★★
+
+            // AI応答をセッションに追加 (日付なしの応答を保存)
+            if (currentSession) {
+                 currentSession.messages.push({
+                     sender: 'Gemini',
+                     text: refinedAnswer, // ★ 日付なしの refinedAnswer を保存 ★
+                     timestamp: new Date(),
+                     sources: finalSources
+                 });
+                 currentSession.updatedAt = new Date().toISOString();
+
+                 // ★★★ 天気情報用の日付ヘッダーを追加するロジックは addMessageRow に任せるため削除 ★★★
+                 /*
+                 const chatMessagesDiv = document.getElementById('chatMessages');
+                 const today = new Date(); // 再度取得は冗長だが削除するのでOK
+                 const dateHeaderStr = `${today.getFullYear()}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getDate().toString().padStart(2, '0')} (${getWeekday(today)})`;
+                 const existingHeaders = chatMessagesDiv.querySelectorAll('.date-header');
+                 const lastHeader = existingHeaders.length > 0 ? existingHeaders[existingHeaders.length - 1] : null;
+                 if (!lastHeader || lastHeader.innerText !== dateHeaderStr) {
+                     const dateHeader = document.createElement('div');
+                     dateHeader.classList.add('date-header');
+                     dateHeader.innerText = dateHeaderStr;
+                     chatMessagesDiv.appendChild(dateHeader);
+                     console.log("Added date header for weather info.");
+                     // lastHeaderDate = dateHeaderStr; // 文字列代入は元々問題があった
+                     lastHeaderDate = today; // Dateオブジェクトで更新するならこちらだが、これも不要
+                 } else {
+                     console.log("Date header for today already exists, skipping for weather info.");
+                 }
+                 */
+                 // ★★★ ヘッダー追加削除ここまで ★★★
+
+                 // UI更新 (日付なし応答を表示)
+                 if (loadingRow && loadingText) {
+                    console.log("Weather response received. Removing loading row and adding new message via addMessageRow.");
+                    loadingRow.remove();
+                    // 新しいメッセージ行を追加 (addMessageRow がヘッダーを処理)
+                    addMessageRow(refinedAnswer, 'other', new Date().getTime(), finalSources); // ★ refinedAnswer を渡す ★
+                 } else {
+                    console.log("Adding new message row for weather info (no loading indicator shown) - addMessageRow will handle header.");
+                     // ★ 日付なしで表示 (addMessageRow がヘッダーを処理) ★
+                     addMessageRow(refinedAnswer, 'other', new Date().getTime(), finalSources); // ★ refinedAnswer を渡す ★
+                 }
+                 scrollToBottom();
+            } else {
+                 console.error("Cannot add weather message, no current session available.");
+                 addMessageRow("エラー: 現在のセッションが見つかりません。", 'other');
+                 scrollToBottom();
+            }
+        } else {
+             console.error("Received null or invalid response from weather worker call.");
+             if (loadingRow && loadingText) {
+                 loadingText.classList.remove('blinking-text');
+                 loadingText.innerText = rawAnswer;
+             } else {
+                  addMessageRow(rawAnswer, 'other');
+             }
+             scrollToBottom();
+        }
+
+    } catch (error) {
+        clearTimeout(updateTimeout);
+        console.error("Error in getWeatherForCities:", error);
+        const errorMessage = `天気情報の取得エラー: ${error.message}`;
+        if (loadingRow && loadingText) {
+             loadingText.classList.remove('blinking-text');
+             loadingText.innerText = errorMessage;
+        } else {
+             addMessageRow(errorMessage, 'other');
+        }
+        scrollToBottom();
+        // エラー時もバックアップを試みるかは検討 (今回は実施しない)
+    }
+}
+
+// ===== ログアウト関数 (定義位置確認) =====
+function logout() {
+  firebase.auth().signOut().then(() => {
+    console.log("ログアウトしました");
+    // ログアウト後の処理 (ログインページへリダイレクト)
+    window.location.href = "login.html"; // Assuming login.html exists
+  }).catch((error) => {
+    console.error("ログアウトエラー:", error);
+  });
+}
+
+// ===== セッション削除関数 =====
+async function deleteSessionById(id) {
+    console.log("deleteSessionById called for ID:", id);
+    const currentUser = firebase.auth().currentUser;
+    if (!currentUser) {
+        console.error("ユーザーがログインしていません。削除できません。");
+        return;
+    }
+
+    const sessionIndex = conversationSessions.findIndex(s => s.id === id);
+    if (sessionIndex === -1) {
+        console.warn("削除対象のセッションがローカルに見つかりません:", id);
+        // Firebase だけに存在する場合も考慮するなら、ここで Firebase から削除を試みる
+    } else {
+        // ローカルから削除
+        conversationSessions.splice(sessionIndex, 1);
+        console.log("ローカルからセッションを削除しました:", id);
+        // カレントセッションが削除された場合、null にする
+        if (currentSession && currentSession.id === id) {
+            currentSession = null;
+             // 必要であれば、別のセッションをロードするか新規作成する
+             // loadSessionById(...) または startNewChat() など
+             // ここでは一旦クリアするだけにする
+             document.getElementById('chatMessages').innerHTML = "";
+             lastHeaderDate = null; 
+        }
+    }
+
+    try {
+        // Firebase から削除
+        await db.collection("chatSessions").doc(id).delete();
+        console.log("Firestore からセッションを削除しました:", id);
+    } catch (error) {
+        console.error("Firestore からのセッション削除エラー:", error);
+        // エラーが発生した場合、ローカルの削除を取り消すか、ユーザーに通知するか検討
+        // 現状はエラーログのみ
+    }
+
+    // サイドメニューを更新して変更を反映
+    updateSideMenu();
+}
+
+// ===== DOMContentLoaded イベントリスナー (ファイル末尾に移動) =====
+document.addEventListener('DOMContentLoaded', () => {
+    // ★ DOMContentLoaded が発火したことを確認 (重複チェック用) ★
+    console.log("DOMContentLoaded event listener EXECUTING...");
+
+    // ★ FirebaseUI の初期化をガード ★
+    let ui = null;
     const uiConfig = {
         signInSuccessUrl: './', // ログイン成功後のリダイレクト先
         signInOptions: [
             firebase.auth.GoogleAuthProvider.PROVIDER_ID,
-            // 必要なら他のプロバイダも追加
-            // firebase.auth.EmailAuthProvider.PROVIDER_ID,
         ],
         tosUrl: null, // 利用規約URL (任意)
         privacyPolicyUrl: null // プライバシーポリシーURL (任意)
     };
-    const ui = new firebaseui.auth.AuthUI(firebase.auth());
+    if (!firebaseUiInitialized) {
+        ui = new firebaseui.auth.AuthUI(firebase.auth()); // ここで初期化
+        firebaseUiInitialized = true; // 初期化済みフラグを立てる
+        console.log("FirebaseUI initialized.");
+    } else {
+        console.log("FirebaseUI already initialized, skipping.");
+    }
 
     // 認証状態の監視
     firebase.auth().onAuthStateChanged(async (user) => {
+        // ... (要素取得)
         const loginContainer = document.getElementById('firebaseui-auth-container');
-        const mainContent = document.querySelector('.chat-container'); // メインコンテンツを選択
-        const headerControls = document.querySelector('#main-header .header-controls');
+        const mainContent = document.querySelector('.chat-container');
+        const headerControls = document.querySelector('#main-header .header-controls'); // ★ ここで取得
         const sideMenu = document.getElementById('side-menu');
 
         if (user) {
-            console.log("ログイン中のユーザー:", user.email);
+            // ★ ログイン時のログを追加 ★
+            console.log("User logged in. Attempting to show UI elements.");
+
             if (loginContainer) loginContainer.style.display = 'none';
-            if (mainContent) mainContent.style.display = 'flex'; // flex に戻す
-            if (headerControls) headerControls.style.display = 'flex';
-            if (sideMenu) sideMenu.style.display = 'flex'; // サイドメニューも表示
-            document.getElementById('user-email').textContent = user.email; // メールアドレス表示
+            if (mainContent) mainContent.style.display = 'flex';
 
-            // ★★★ 認証後に初期化処理を実行 ★★★
-            try {
-                showThinkingIndicator(true);
-                await restoreFromFirebase(); // データをリストア
-                updateSideMenuFromFirebase(); // サイドメニュー更新
-                await updateUntitledSessions(); // 未タイトルのセッションを更新
-
-                // リストア後に現在のセッションがない場合のみ新規作成
-                if (!currentSession) {
-                    console.log("No current session after restore, creating new one.");
-                    await createNewSession(); // 新規セッションを作成
-                }
-                showThinkingIndicator(false);
-            } catch (error) {
-                console.error("Initialization error after login:", error);
-                showThinkingIndicator(false);
-                 // エラーが発生してもUIは表示されたままにする
-                 if (!currentSession) {
-                     // フォールバックとして空の新規セッションを試みる
-                     try {
-                         await createNewSession();
-                     } catch (fallbackError) {
-                         console.error("Fallback createNewSession failed:", fallbackError);
-                         // ここでさらにエラー処理が必要なら追加
-                     }
-                 }
+            // ★ headerControls の存在確認とスタイル設定ログ ★
+            if (headerControls) {
+                console.log("Header controls element FOUND. Setting display to flex.");
+                headerControls.style.display = 'flex'; // 表示
+            } else {
+                console.error("Header controls element (#main-header .header-controls) NOT FOUND when trying to display!");
             }
-            // ★★★ 初期化処理ここまで ★★★
+
+            if (sideMenu) {
+                console.log("Side menu element FOUND. Setting display to flex.");
+                 sideMenu.style.display = 'flex'; // 表示
+            } else {
+                console.error("Side menu element (#side-menu) NOT FOUND when trying to display!");
+            }
+
+            document.getElementById('user-email').textContent = user.email;
+
+            // ... (初期化処理)
+            try {
+                 showThinkingIndicator(true);
+                 await restoreFromFirebase();
+                 await updateUntitledSessions();
+                 if (!currentSession) {
+                     console.log("No current session after restore, creating new one.");
+                     await createNewSession();
+                 }
+                 showThinkingIndicator(false);
+             } catch (error) {
+                 console.error("Initialization error after login:", error);
+                 showThinkingIndicator(false);
+                  if (!currentSession) {
+                      try {
+                          await createNewSession();
+                      } catch (fallbackError) {
+                          console.error("Fallback createNewSession failed:", fallbackError);
+                      }
+                  }
+             }
 
         } else {
-            console.log("ユーザーはログアウトしています");
-            if (loginContainer) loginContainer.style.display = 'block';
-            if (mainContent) mainContent.style.display = 'none';
-            if (headerControls) headerControls.style.display = 'none';
-            if (sideMenu) sideMenu.style.display = 'none'; // サイドメニューも非表示
-            ui.start('#firebaseui-auth-container', uiConfig);
+             // ★ ログアウト時のログを追加 ★
+             console.log("User logged out. Attempting to hide UI elements and show login.");
+
+             if (loginContainer) loginContainer.style.display = 'block';
+             if (mainContent) mainContent.style.display = 'none';
+
+             // ★ headerControls の存在確認とスタイル設定ログ (非表示) ★
+             if (headerControls) {
+                 console.log("Header controls element FOUND. Setting display to none.");
+                 headerControls.style.display = 'none'; // 非表示
+             } else {
+                 console.error("Header controls element (#main-header .header-controls) NOT FOUND when trying to hide!");
+             }
+
+             if (sideMenu) {
+                 console.log("Side menu element FOUND. Setting display to none.");
+                  sideMenu.style.display = 'none'; // 非表示
+             } else {
+                 console.error("Side menu element (#side-menu) NOT FOUND when trying to hide!");
+             }
+
+            // ... (FirebaseUI の開始処理など)
+            if (ui) {
+                // ... (ui.start)
+            } else {
+                // ... (warn and fallback)
+            }
             conversationSessions = [];
             currentSession = null;
-            updateSideMenu(); // サイドメニューをクリア
+            updateSideMenu();
         }
     });
 
-    // --- DOMContentLoaded 内の他のリスナー設定 (ID修正) ---
-    // ★ IDを index.html に合わせる ★
-    const sendButton = document.getElementById('sendBtn'); 
+    // --- DOMContentLoaded 内の他のリスナー設定 ---
+    console.log("Setting up other event listeners..."); // ★ リスナー設定開始ログ ★
+    const sendButton = document.getElementById('sendBtn');
     const chatInput = document.getElementById('chatInput');
     const hamburger = document.getElementById('hamburger');
     const closeMenu = document.getElementById('close-menu');
     const newChat = document.getElementById('new-chat');
-    const modelSelect = document.getElementById('model-select'); 
-    const dropdownToggle = document.getElementById('dropdown-toggle'); // ★ index.html に ID 追加が必要 ★
-    const deleteToggle = document.getElementById('delete-thread-mode-btn'); 
+    const modelSelect = document.getElementById('model-select');
+    const dropdownToggle = document.getElementById('dropdown-toggle');
+    const deleteToggle = document.getElementById('delete-thread-mode-btn');
     const logoutLink = document.getElementById('logout-link');
     const micBtn = document.getElementById('micBtn');
+    const weatherBtn = document.getElementById('weather-btn'); // ★ 天気ボタン取得のコメントアウト解除 ★
 
-    // イベントリスナーを追加 (null チェックを追加してより安全に)
     if (sendButton) sendButton.addEventListener('click', onSendButton);
     if (chatInput) chatInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1355,85 +1678,100 @@ document.addEventListener('DOMContentLoaded', () => {
     if (newChat) newChat.addEventListener('click', startNewChat);
     if (modelSelect) modelSelect.addEventListener('change', () => {
         console.log(`Model changed to: ${modelSelect.value}`);
-        // 必要であればモデル変更時の処理を追加
     });
-    if (dropdownToggle) dropdownToggle.addEventListener('click', (e) => { // ★ null チェック追加 ★
-        e.stopPropagation(); // Prevent body click handler from closing immediately
-        // ★ querySelector を使って親の .dropdown を探す方が確実かもしれない ★
-        const dropdownMenu = document.getElementById('dropdown-content'); 
+    if (dropdownToggle) dropdownToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dropdownMenu = document.getElementById('dropdown-content');
         const parentDropdown = dropdownMenu ? dropdownMenu.closest('.dropdown') : null;
         if(parentDropdown) {
             parentDropdown.classList.toggle('open');
         }
-        // document.getElementById('menu-footer').querySelector('.dropdown').classList.toggle('open'); // 古いセレクタ
     });
-     // Add event listener for delete toggle
-     if (deleteToggle) deleteToggle.addEventListener('click', (e) => { // ★ null チェック追加 ★
+    if (deleteToggle) deleteToggle.addEventListener('click', (e) => {
         e.preventDefault();
         isDeleteMode = !isDeleteMode;
-        // ★ textContent ではなく innerHTML を使ってアイコンを含めるか、アイコン要素を別途操作 ★
-        // deleteToggle.textContent = isDeleteMode ? '🗑️ 削除モード (完了)' : '🗑️ スレッド削除';
-        deleteToggle.innerHTML = isDeleteMode ? '<i class="bi bi-check-circle-fill"></i> 削除モード (完了)' : '<i class="bi bi-trash"></i> スレッド削除'; // アイコンも変更する例
-        updateSideMenu(); // Update display of delete icons
-        // Close dropdown after selection
+        deleteToggle.innerHTML = isDeleteMode ? '<i class="bi bi-check-circle-fill"></i> 削除モード (完了)' : '<i class="bi bi-trash"></i> スレッド削除';
+        updateSideMenu();
         const parentDropdown = deleteToggle.closest('.dropdown');
         if (parentDropdown) {
              parentDropdown.classList.remove('open');
         }
     });
-    if (logoutLink) logoutLink.addEventListener('click', logout);
-    // Mic button listener (null チェックは既存のコードにある想定)
+    if (logoutLink) {
+        console.log("Logout link found. Adding listener...");
+        logoutLink.addEventListener('click', logout); // logout 関数を参照
+        console.log("Listener added for logout link.");
+    } else {
+        console.warn("Logout link (#logout-link) not found.");
+    }
     if (micBtn) {
-        // ★ toggleRecording を呼び出すように修正/確認 ★
         micBtn.addEventListener('click', toggleRecording);
     } else {
         console.warn("Mic button (#micBtn) not found.");
     }
 
-    // Outside click closes dropdown
+    // ★★★ 天気ボタンのリスナー設定周りのコメントアウト解除 ★★★
+    console.log("Attempting to find weather button (#weather-btn)...");
+    // const weatherBtn = document.getElementById('weather-btn'); // 上で宣言済み
+    if (weatherBtn) {
+        console.log("Weather button FOUND. Adding event listener...");
+        weatherBtn.addEventListener('click', getWeatherForCities);
+        console.log("Event listener ADDED for weather button.");
+    } else {
+        console.warn("Weather button (#weather-btn) NOT FOUND when trying to add listener.");
+    }
+    console.log("Finished setting up other event listeners."); // ★ リスナー設定完了ログ ★
+
+    // Outside click closes dropdown AND side menu
     document.addEventListener('click', function handleOutsideClick(e) {
-        const dropdown = document.getElementById('menu-footer')?.querySelector('.dropdown.open'); // 開いているドロップダウンを取得
-        // クリックされた場所がドロップダウンの外であるか確認 (トグルボタンも除外)
+        // Close dropdown menu
+        const dropdown = document.getElementById('menu-footer')?.querySelector('.dropdown.open');
         if (dropdown && !dropdown.contains(e.target) && !document.getElementById('dropdown-toggle')?.contains(e.target)) {
             dropdown.classList.remove('open');
+            console.log("Clicked outside dropdown, closing dropdown.");
+        }
+
+        // Close side menu
+        const sideMenu = document.getElementById('side-menu');
+        const hamburger = document.getElementById('hamburger');
+        if (sideMenu && sideMenu.classList.contains('open') && hamburger && !sideMenu.contains(e.target) && !hamburger.contains(e.target)) {
+            sideMenu.classList.remove('open');
+            console.log("Clicked outside side menu and hamburger, closing side menu.");
         }
     });
 
     // Initialize speech recognition (if available)
-    // ★ 確実に呼び出されるようにする ★
     initializeSpeechRecognition();
 
-    // --- 象の画像クリックイベントリスナー (old.js から移植) ---
+    // --- 象の画像クリックイベントリスナー ---
     const elephantImg = document.getElementById("elephantImg");
     const elephantBubble = document.getElementById("elephantBubble");
 
     if (elephantImg && elephantBubble) {
-      elephantImg.addEventListener("click", function() {
-        if (elephantBubble.classList.contains("visible")) {
-          elephantBubble.classList.remove("visible");
-        } else {
-          const randomCity = getRandomCity();
-          setSpeechBubbleText("位置情報取得中..."); // 一時的なメッセージ (既存の関数を利用)
-          getCityInfo(randomCity)
-            .then(info => {
-              setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`); // 既存の関数を利用
-              setTimeout(() => {
+        // ... (変更なし)
+        elephantImg.addEventListener("click", function() {
+            if (elephantBubble.classList.contains("visible")) {
                 elephantBubble.classList.remove("visible");
-              }, 6000);
-            })
-            .catch(error => {
-              setSpeechBubbleText(error); // エラーメッセージを表示 (既存の関数を利用)
-              setTimeout(() => {
-                elephantBubble.classList.remove("visible");
-              }, 6000);
-            });
-        }
-      });
-
-      // ウィンドウのリサイズ時にフォントサイズを再調整するリスナーは既存のものを利用 or 必要なら追加
-      // window.addEventListener('resize', adjustSpeechBubbleFontSize);
+            } else {
+                const randomCity = getRandomCity();
+                setSpeechBubbleText("位置情報取得中...");
+                getCityInfo(randomCity)
+                    .then(info => {
+                        setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`);
+                        setTimeout(() => {
+                            elephantBubble.classList.remove("visible");
+                        }, 6000);
+                    })
+                    .catch(error => {
+                        setSpeechBubbleText(error);
+                        setTimeout(() => {
+                            elephantBubble.classList.remove("visible");
+                        }, 6000);
+                    });
+            }
+        });
     }
-
+    console.log("DOMContentLoaded listener execution finished."); // ★ リスナー処理完了ログ ★
 });
 
 // ===== 音声認識関連 =====
@@ -1475,7 +1813,7 @@ function initializeSpeechRecognition() {
                     interimTranscript += event.results[i][0].transcript;
                 }
             }
-            
+
             // ★デバッグログ追加
             console.log("Interim Transcript:", interimTranscript);
             console.log("Final Transcript:", finalTranscript);
@@ -1483,7 +1821,7 @@ function initializeSpeechRecognition() {
             // 確定した結果を入力欄に追加（既存のテキストの後ろに追加）
             if (finalTranscript) {
                  // ★ chatInput が正しく参照できているか確認 ★
-                const chatInput = document.getElementById("chatInput"); 
+                const chatInput = document.getElementById("chatInput");
                 if (chatInput) {
                     chatInput.value += finalTranscript;
                     console.log(`Appended final transcript to chatInput. New value: '${chatInput.value}'`);
@@ -1527,7 +1865,7 @@ function initializeSpeechRecognition() {
     }
 }
 
-// ★ toggleRecording の実装 (old.js から移植) ★
+// ★ toggleRecording の実装 (適切な位置に定義) ★
 function toggleRecording() {
     console.log("toggleRecording called");
     if (!recognition) {
@@ -1540,156 +1878,10 @@ function toggleRecording() {
             // onstart でログ出力するためここでは省略
         } catch (error) {
             console.error("音声認識の開始に失敗しました:", error);
-            alert("音声認識を開始できませんでした。ブラウザがマイクの使用を許可しているか確認してください。");
+            alert("音声認識を開始できませんでした。ブラウザがマイクの使用を許可しているか確認してください。注意: この機能はHTTPS接続でのみ動作する場合があります。"); // 注意喚起追加
         }
     } else {
         recognition.stop();
         // onend でログ出力するためここでは省略
     }
-}
-
-// ===== ここから追加 =====
-// ログアウト関数
-function logout() {
-  firebase.auth().signOut().then(() => {
-    console.log("ログアウトしました");
-    // ログアウト後の処理 (ログインページへリダイレクト)
-    window.location.href = "login.html";
-  }).catch((error) => {
-    console.error("ログアウトエラー:", error);
-  });
-}
-// ===== ここまで追加 =====
-
-// ===== ここから追加 =====
-// 指定されたIDのセッションを削除する関数
-async function deleteSessionById(id) {
-  console.log("deleteSessionById called for id:", id);
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.error("ユーザーがログインしていません。セッションを削除できません。");
-    return;
-  }
-
-  try {
-    // ★ パスを /chatSessions/{sessionId} に変更 ★
-    await db.collection("chatSessions").doc(id).delete();
-    console.log("Firebaseからセッションを削除しました (/chatSessions):", id);
-
-    // ローカル配列から削除
-    conversationSessions = conversationSessions.filter(s => s.id !== id);
-
-    // 現在のセッションが削除された場合
-    if (currentSession && currentSession.id === id) {
-      currentSession = null;
-      document.getElementById('chatMessages').innerHTML = ""; // チャット画面をクリア
-      lastMessageDate = "";
-      console.log("現在のセッションが削除されたため、チャット画面をクリアしました。");
-    }
-
-    // サイドメニューを更新
-    updateSideMenu();
-
-  } catch (error) {
-    console.error("セッションの削除中にエラーが発生しました:", error);
-    alert("セッションの削除中にエラーが発生しました。");
-  }
-}
-// ===== ここまで追加 =====
-
-// ===== サイドメニュー外クリックで閉じる処理 =====
-document.addEventListener('click', function handleOutsideClick(e) {
-    const sideMenu = document.getElementById('side-menu');
-    const hamburgerIcon = document.getElementById('hamburger'); // メニューを開くボタン
-
-    // メニューが開いているか確認
-    if (sideMenu.classList.contains('open')) {
-        // クリックがメニュー自身の上ではないか、かつ、ハンバーガーアイコンの上ではないかを確認
-        if (!sideMenu.contains(e.target) && e.target !== hamburgerIcon && !hamburgerIcon.contains(e.target)) {
-            sideMenu.classList.remove('open');
-            console.log('Clicked outside, closing side menu.');
-        }
-    }
-});
-
-// ===== 象の吹き出し関連 ヘルパー関数 =====
-
-// 都市の緯度経度 (old.js からコピー)
-const cities = [
-  { name: "台南", latitude: 23.1417, longitude: 120.2513 },
-  { name: "台北", latitude: 25.0330, longitude: 121.5654 },
-  { name: "台中", latitude: 24.1477, longitude: 120.6736 },
-  { name: "高雄", latitude: 22.6273, longitude: 120.3014 },
-  { name: "台東", latitude: 22.7583, longitude: 121.1444 },
-  { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
-  { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
-  { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 },
-  { name: "ニューヨーク", latitude: 40.7128, longitude: -74.0060 }
-];
-
-// 方角を計算する関数 (old.js からコピー)
-function calculateDirection(lat1, lon1, lat2, lon2) {
-  const lat1Rad = lat1 * Math.PI / 180;
-  const lon1Rad = lon1 * Math.PI / 180;
-  const lat2Rad = lat2 * Math.PI / 180;
-  const lon2Rad = lon2 * Math.PI / 180;
-  const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
-  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
-  let bearing = Math.atan2(y, x) * (180 / Math.PI);
-  bearing = (bearing + 360) % 360;
-  const directions = [
-    "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
-    "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"
-  ];
-  const index = Math.round(bearing / 22.5) % 16;
-  return directions[index];
-}
-
-// 2点間の距離を計算する関数 (old.js からコピー)
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // 地球の半径（km）
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distance = R * c;
-  return Math.round(distance);
-}
-
-// ランダムな都市を選択する関数 (old.js からコピー)
-function getRandomCity() {
-  const randomIndex = Math.floor(Math.random() * cities.length);
-  return cities[randomIndex];
-}
-
-// GPS情報を取得して選択された都市との距離と方向を計算する関数 (old.js からコピー)
-function getCityInfo(city) {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject("お使いのブラウザは位置情報をサポートしていません。");
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const currentLat = position.coords.latitude;
-        const currentLon = position.coords.longitude;
-        const distance = calculateDistance(currentLat, currentLon, city.latitude, city.longitude);
-        const direction = calculateDirection(currentLat, currentLon, city.latitude, city.longitude);
-        resolve({ city: city.name, distance, direction });
-      },
-      (error) => {
-        let errorMessage = "位置情報の取得に失敗しました。";
-        switch(error.code) {
-          case error.PERMISSION_DENIED: errorMessage = "位置情報の利用が許可されていません。"; break;
-          case error.POSITION_UNAVAILABLE: errorMessage = "位置情報を取得できませんでした。"; break;
-          case error.TIMEOUT: errorMessage = "位置情報の取得がタイムアウトしました。"; break;
-        }
-        reject(errorMessage);
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  });
 }

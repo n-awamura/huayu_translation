@@ -1743,35 +1743,48 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize speech recognition (if available)
     initializeSpeechRecognition();
 
-    // --- 象の画像クリックイベントリスナー ---
+    // --- 象の画像クリックイベントリスナー (復活/確認) ---
     const elephantImg = document.getElementById("elephantImg");
     const elephantBubble = document.getElementById("elephantBubble");
 
     if (elephantImg && elephantBubble) {
-        // ... (変更なし)
-        elephantImg.addEventListener("click", function() {
+        console.log("Elephant image and bubble FOUND. Adding click listener."); // 確認用ログ
+        elephantImg.addEventListener("click", async function() { // ★ async を追加 (getCityInfo が非同期のため) ★
+            console.log("Elephant image CLICKED."); // 確認用ログ
             if (elephantBubble.classList.contains("visible")) {
                 elephantBubble.classList.remove("visible");
+                console.log("Bubble was visible, hiding it."); // 確認用ログ
             } else {
                 const randomCity = getRandomCity();
-                setSpeechBubbleText("位置情報取得中...");
-                getCityInfo(randomCity)
-                    .then(info => {
-                        setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`);
-                        setTimeout(() => {
-                            elephantBubble.classList.remove("visible");
-                        }, 6000);
-                    })
-                    .catch(error => {
-                        setSpeechBubbleText(error);
-                        setTimeout(() => {
-                            elephantBubble.classList.remove("visible");
-                        }, 6000);
-                    });
+                console.log("Random city selected:", randomCity); // 確認用ログ
+                setSpeechBubbleText("都市情報を取得中だゾウ..."); // ★ 処理中のメッセージを表示 ★
+                try {
+                    const info = await getCityInfo(randomCity); // ★ await を使用 ★
+                    console.log("Received city info:", info); // 確認用ログ
+                    // ★★★ ここで結果を吹き出しに表示 ★★★
+                    setSpeechBubbleText(`${info.city}は${info.direction}${info.distance}kmだゾウ！`);
+                    // ★★★ 表示処理ここまで ★★★
+
+                    // 一定時間後に吹き出しを消すタイマー (必要に応じて調整)
+                    setTimeout(() => {
+                        elephantBubble.classList.remove("visible");
+                    }, 6000);
+                } catch (error) {
+                    console.error("Error getting city info:", error); // 確認用ログ
+                    setSpeechBubbleText(`エラーだゾウ: ${error.message || '情報取得失敗'}`); // ★ エラー時も表示 ★
+                    // エラー時も一定時間後に消す
+                    setTimeout(() => {
+                        elephantBubble.classList.remove("visible");
+                    }, 6000);
+                }
             }
         });
+    } else {
+        console.warn("Elephant image (#elephantImg) or bubble (#elephantBubble) not found.");
     }
-    console.log("DOMContentLoaded listener execution finished."); // ★ リスナー処理完了ログ ★
+    // --- 象の画像クリックイベントリスナーここまで ---
+
+    console.log("DOMContentLoaded listener execution finished.");
 });
 
 // ===== 音声認識関連 =====
@@ -1885,3 +1898,171 @@ function toggleRecording() {
         // onend でログ出力するためここでは省略
     }
 }
+
+// ===== 都市情報取得関連のヘルパー関数 (old.js から復活) =====
+
+// 都市の緯度経度リスト (old.js のリストに戻す)
+const cities = [
+    { name: "台南", latitude: 23.1417, longitude: 120.2513 },
+    { name: "台北", latitude: 25.0330, longitude: 121.5654 },
+    { name: "台中", latitude: 24.1477, longitude: 120.6736 },
+    { name: "高雄", latitude: 22.6273, longitude: 120.3014 },
+    { name: "台東", latitude: 22.7583, longitude: 121.1444 },
+    { name: "花蓮", latitude: 23.9769, longitude: 121.5514 },
+    { name: "ホノルル", latitude: 21.3069, longitude: -157.8583 },
+    { name: "サンフランシスコ", latitude: 37.7749, longitude: -122.4194 },
+    { name: "ニューヨーク", latitude: 40.7128, longitude: -74.0060 }
+];
+
+// 方角を計算する関数 (old.js より)
+function calculateDirection(lat1, lon1, lat2, lon2) {
+    const lat1Rad = lat1 * Math.PI / 180;
+    const lon1Rad = lon1 * Math.PI / 180;
+    const lat2Rad = lat2 * Math.PI / 180;
+    const lon2Rad = lon2 * Math.PI / 180;
+    const y = Math.sin(lon2Rad - lon1Rad) * Math.cos(lat2Rad);
+    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lon2Rad - lon1Rad);
+    let bearing = Math.atan2(y, x) * (180 / Math.PI);
+    bearing = (bearing + 360) % 360;
+    const directions = [
+        "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東",
+        "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"
+    ];
+    const index = Math.round(bearing / 22.5) % 16;
+    return directions[index];
+}
+
+// 2点間の距離を計算する関数 (Haversine formula) (old.js より)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // 地球の半径（km）
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    return Math.round(distance); // 整数に丸める
+}
+
+// ランダムな都市を選ぶ関数 (cities 配列を使用)
+function getRandomCity() {
+    const randomIndex = Math.floor(Math.random() * cities.length);
+    return cities[randomIndex];
+}
+
+// GPS情報を取得して都市情報を計算する関数 (old.js ベースに修正)
+function getCityInfo(city) {
+    console.log(`getCityInfo called for: ${city.name}`);
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error("お使いのブラウザは位置情報をサポートしていません。")); // Error オブジェクトを reject
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                try {
+                    const currentLat = position.coords.latitude;
+                    const currentLon = position.coords.longitude;
+                    console.log(`Current location: Lat=${currentLat}, Lon=${currentLon}`);
+
+                    const distance = calculateDistance(
+                        currentLat, currentLon,
+                        city.latitude, city.longitude
+                    );
+                    console.log(`Calculated distance to ${city.name}: ${distance} km`);
+
+                    const direction = calculateDirection(
+                        currentLat, currentLon,
+                        city.latitude, city.longitude
+                    );
+                    console.log(`Calculated direction to ${city.name}: ${direction}`);
+
+                    resolve({ city: city.name, distance, direction });
+                } catch (calculationError) {
+                    console.error("Error during distance/direction calculation:", calculationError);
+                    reject(new Error("位置情報の計算中にエラーが発生しました。"));
+                }
+            },
+            (error) => {
+                console.error("Geolocation error:", error);
+                let errorMessage = "位置情報の取得に失敗しました。";
+                switch (error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMessage = "位置情報の利用が許可されていません。";
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMessage = "位置情報を取得できませんでした。";
+                        break;
+                    case error.TIMEOUT:
+                        errorMessage = "位置情報の取得がタイムアウトしました。";
+                        break;
+                }
+                reject(new Error(errorMessage)); // Error オブジェクトを reject
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // タイムアウトを少し延ばす
+        );
+    });
+}
+
+// 吹き出しのテキストを設定・調整する関数群 (既存)
+function setSpeechBubbleText(text) {
+    console.log("[setSpeechBubbleText] Function called with text:", text);
+    const bubble = document.getElementById('elephantBubble');
+    if (!bubble) {
+        console.error("[setSpeechBubbleText] Bubble element not found!");
+        return;
+    }
+    console.log("[setSpeechBubbleText] Bubble element FOUND.");
+    try {
+        bubble.textContent = text;
+        console.log("[setSpeechBubbleText] textContent set successfully.");
+        bubble.classList.add('visible');
+        console.log("[setSpeechBubbleText] 'visible' class added.");
+        adjustSpeechBubbleFontSize(); // フォントサイズ調整呼び出し
+        console.log("[setSpeechBubbleText] adjustSpeechBubbleFontSize called successfully.");
+    } catch (error) {
+        console.error("[setSpeechBubbleText] Error during setting text or class:", error);
+    }
+}
+
+function adjustSpeechBubbleFontSize() {
+    console.log("[adjustSpeechBubbleFontSize] Function called.");
+    const bubble = document.getElementById('elephantBubble');
+    if (!bubble) {
+        console.error("[adjustSpeechBubbleFontSize] Bubble element not found!");
+        return;
+    }
+    console.log("[adjustSpeechBubbleFontSize] Bubble element FOUND.");
+    try {
+        const maxWidth = bubble.offsetWidth;
+        console.log("[adjustSpeechBubbleFontSize] offsetWidth obtained:", maxWidth);
+        const textLength = bubble.textContent.length;
+        console.log("[adjustSpeechBubbleFontSize] textContent.length obtained:", textLength);
+
+        // 長さに応じてクラスをトグル (閾値は適宜調整)
+        if (textLength > 30) { // 例: 30文字を超えたら小さくする
+            console.log("[adjustSpeechBubbleFontSize] Text is long, adding 'long' class.");
+            bubble.classList.add('long');
+        } else {
+            console.log("[adjustSpeechBubbleFontSize] Text is short, removing 'long' class.");
+            bubble.classList.remove('long');
+        }
+
+        // スクロール幅でのチェックも残す
+        const scrollWidth = bubble.scrollWidth;
+        console.log("[adjustSpeechBubbleFontSize] scrollWidth obtained:", scrollWidth);
+        if (scrollWidth > maxWidth) {
+            console.log("[adjustSpeechBubbleFontSize] scrollWidth > maxWidth, adding 'long' class.");
+            bubble.classList.add('long');
+        }
+        console.log("[adjustSpeechBubbleFontSize] Font size adjustment finished.");
+    } catch (error) {
+        console.error("[adjustSpeechBubbleFontSize] Error during font size adjustment:", error);
+    }
+}
+
+// ★ toggleRecording の実装 (適切な位置に定義) ★
+// ... (変更なし)

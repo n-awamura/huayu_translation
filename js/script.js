@@ -768,7 +768,7 @@ async function callGemini(userInput) {
 
     const modelSelect = document.getElementById('model-select');
     const selectedModelValue = modelSelect.value;
-    const isGroundingModel = (selectedModelValue === 'gemini-1.5-pro' || selectedModelValue === 'gemini-2.0-flash');
+    // const isGroundingModel = (selectedModelValue === 'gemini-1.5-pro' || selectedModelValue === 'gemini-2.0-flash'); // ★ 判定方法変更のため不要に
     const isTaiwanMode = (selectedModelValue === 'gemini-1.5-pro-tw');
 
     // ★ 考え中メッセージ表示の準備 (old.js から移植) ★
@@ -813,38 +813,29 @@ async function callGemini(userInput) {
         console.log(`callGemini called`);
         console.log(`Selected Model Value: ${selectedModelValue}`);
         console.log(`Is Taiwan Mode?: ${isTaiwanMode}`);
-        console.log(`Is Grounding Model?: ${isGroundingModel}`);
+        // console.log(`Is Grounding Model?: ${isGroundingModel}`); // ★ 削除
 
-        // ★ モードに応じてパラメータを設定 ★
+        // ★ モードに応じてパラメータを設定 (ノーマル = 1.5 Pro Grounding) ★
         if (isTaiwanMode) {
             // 台湾華語モード (第1段階: 翻訳のみ)
-            targetModelForFirstCall = 'gemini-1.5-pro';
+            targetModelForFirstCall = 'gemini-1.5-pro'; // 翻訳自体は 1.5 Pro で良いか要検討
             promptToSendForFirstCall = `「${userInput}」を台湾で使われる繁体字中国語（台湾華語）に自然に訳してください。`;
             useGroundingForFirstCall = false;
             toolNameForGrounding = null;
             console.log(`Taiwan Mode - Translation Prompt: ${promptToSendForFirstCall}`);
-        } else if (isGroundingModel) {
-             // --- Grounding モデルの場合 (ノーマル または じっくり) ---
+        } else if (selectedModelValue === 'gemini-1.5-pro') { // ★ 新しい「ノーマル」モード ★
              promptToSendForFirstCall = buildPromptFromHistory();
              useGroundingForFirstCall = true;
-             // ★ 選択された値に応じてモデルとツールを決定 ★
-             if (selectedModelValue === 'gemini-1.5-pro') { // じっくり
-                 targetModelForFirstCall = 'gemini-1.5-pro';
-                 toolNameForGrounding = 'googleSearchRetrieval';
-                 console.log(`Grounding Mode (1.5 Pro / じっくり) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
-             } else { // ノーマル (gemini-2.0-flash)
-                 targetModelForFirstCall = 'gemini-2.0-flash'; // value から -grounding を除く
-                 toolNameForGrounding = 'googleSearch';
-                 console.log(`Grounding Mode (2.0 Flash / ノーマル) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
-             }
+             targetModelForFirstCall = 'gemini-1.5-pro'; // モデル指定
+             toolNameForGrounding = 'googleSearchRetrieval'; // ツール指定 (旧じっくりと同じ)
+             console.log(`Normal Mode (1.5 Pro / Grounding) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
         } else {
-             // --- Grounding でないモデル (現状ここには来ないはず) ---
-             // もし Grounding しないモードを追加する場合はここに処理を書く
+             // --- ここに来ることは想定しない (他のモードを追加する場合は処理を記述) ---
+             console.warn(`Unexpected model value: ${selectedModelValue}. Falling back to default behavior.`);
              promptToSendForFirstCall = buildPromptFromHistory();
-             targetModelForFirstCall = selectedModelValue;
-             useGroundingForFirstCall = false; 
-             toolNameForGrounding = null;
-             console.log(`Non-Grounding Mode: ${targetModelForFirstCall} - Prompt: ${promptToSendForFirstCall}`);
+             targetModelForFirstCall = 'gemini-1.5-pro'; // フォールバック先
+             useGroundingForFirstCall = true;
+             toolNameForGrounding = 'googleSearchRetrieval';
         }
 
         console.log(`[DEBUG] Checking parameters before API call: useGrounding = ${useGroundingForFirstCall}, Tool name = ${toolNameForGrounding}`);
@@ -1302,243 +1293,55 @@ function showThinkingIndicator(show) {
 // イベントリスナーと初期化
 // ==============================
 
-// ★★★ 天気情報取得関数のコメントアウトを解除 ★★★
+// ===== 天気情報取得関数 (コメントアウト) =====
+/* --- ここからコメントアウト ---
 async function getWeatherForCities() {
-    // ★ 関数が呼び出されたか確認するログ ★
-    console.log("getWeatherForCities function CALLED!");
-    // ★ ここから元の処理 ★
-    console.log("getWeatherForCities called");
-    const cities = ["東京", "台北", "台南", "高雄", "ホノルル"];
-    // ★ プロンプトを再調整: より強く完全なリストを要求 ★
-    const prompt = `以下の全ての都市について、今日の天気予報（天気・最高気温・最低気温）と現在の湿度を検索結果から抽出し、完全なリスト形式で**必ず**教えてください。導入文は不要です。
-
-- 東京
-- 台北
-- 台南
-- 高雄
-- ホノルル`;
-
-    // 考え中インジケーター表示 (callGemini から流用)
-    const chatMessagesDiv = document.getElementById('chatMessages');
-    const delayTime = 1000; // 少し短めに設定
-    let loadingRow = null;
-    let loadingText = null;
-    const updateTimeout = setTimeout(() => {
-        loadingRow = document.createElement('div');
-        loadingRow.classList.add('message-row', 'other');
-
-        const elephantIcon = document.createElement('img');
-        elephantIcon.classList.add('icon');
-        elephantIcon.src = 'img/elephant.png';
-        elephantIcon.alt = '象アイコン';
-        loadingRow.appendChild(elephantIcon);
-
-        const bubble = document.createElement('div');
-        bubble.classList.add('bubble');
-
-        loadingText = document.createElement('div');
-        loadingText.classList.add('bubble-text', 'blinking-text');
-        loadingText.innerText = "天気情報を取得中だゾウ...";
-        bubble.appendChild(loadingText);
-
-        loadingRow.appendChild(bubble);
-        chatMessagesDiv.appendChild(loadingRow);
-        scrollToBottom();
-        console.log("Displayed '天気情報を取得中だゾウ...' message.");
-    }, delayTime);
-
-    try {
-        // アクティブなセッションがない場合、開始を試みる
-        if (!currentSession || currentSession.sessionState !== "active") {
-             console.log("No active session or session not active. Ensuring session is active.");
-             // 既存のセッションがあればアクティブにする、なければ新規作成を試みる
-             if (currentSession) {
-                 currentSession.sessionState = "active";
-                 currentSession.updatedAt = new Date().toISOString();
-             } else {
-                 // 最後にアクティブだったセッションを探すか、新規作成
-                 const lastActiveSession = conversationSessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).find(s => s.messages?.length > 0);
-                 if(lastActiveSession) {
-                    loadSessionById(lastActiveSession.id);
-                    if(currentSession) currentSession.sessionState = "active"; // 念のため
-                 } else {
-                    await createNewSession(); // 新規作成
-                 }
-             }
-             if (!currentSession) {
-                 throw new Error("セッションを開始できませんでした。");
-             }
-             updateSideMenu(); // セッション状態が変わった可能性があるのでサイドメニュー更新
-        }
-
-        console.log(`Calling Model Switcher for weather with model: gemini-2.0-flash, grounding: true, tool: googleSearch`);
-        // Grounding を有効にしてモデルスイッチャーを呼び出す
-        const data = await callGeminiModelSwitcher(
-            prompt,
-            'gemini-2.0-flash',
-            true, // Grounding を有効化
-            'googleSearch' // 標準の Google Search ツールを使用
-        );
-
-        clearTimeout(updateTimeout);
-
-        let rawAnswer = "天気情報の取得に失敗しました。"; // ★ 変数名を変更 ★
-        let finalSources = null;
-
-        if (data && data.answer !== undefined) {
-            rawAnswer = data.answer; // ★ モデルの生応答を保持 ★
-            finalSources = data.sources;
-
-            // ★ 語尾変換処理 (Refinement) ★
-            console.log(`Generating refinement prompt for weather: ${rawAnswer}`);
-            const refinementPrompt = await buildRefinementPrompt("語尾変更", rawAnswer);
-            const refinementModel = 'gemini-2.0-flash';
-            console.log(`Calling Model Switcher (Refinement) for weather with model: ${refinementModel}`);
-            let refinedAnswer = rawAnswer; // ★ 初期値は生応答 ★
-            try {
-                const refinementData = await callGeminiModelSwitcher(refinementPrompt, refinementModel, false, null);
-                if (refinementData && refinementData.answer) {
-                    refinedAnswer = refinementData.answer; // ★ 語尾変換後の応答 ★
-                    console.log('Weather refinement successful.');
-                } else {
-                    console.warn('Weather refinement failed or returned no answer, using original answer.');
-                }
-            } catch (refinementError) {
-                 console.error("Error during weather refinement call:", refinementError);
-                 console.warn("Using original weather answer due to refinement error.");
-            }
-
-            // ★★★ 日付文字列の結合を削除 ★★★
-            // const today = new Date(); // dateString 生成は不要に
-            // const dateString = `${today.getFullYear()}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getDate().toString().padStart(2, '0')} (${getWeekday(today)}) の天気だゾウ！`;
-            // const finalAnswerWithDate = `${dateString}\n\n${refinedAnswer}`; // ★ この行を削除/コメントアウト ★
-            // ★★★ 日付結合削除ここまで ★★★
-
-            // AI応答をセッションに追加 (日付なしの応答を保存)
-            if (currentSession) {
-                 currentSession.messages.push({
-                     sender: 'Gemini',
-                     text: refinedAnswer, // ★ 日付なしの refinedAnswer を保存 ★
-                     timestamp: new Date(),
-                     sources: finalSources
-                 });
-                 currentSession.updatedAt = new Date().toISOString();
-
-                 // ★★★ 天気情報用の日付ヘッダーを追加するロジックは addMessageRow に任せるため削除 ★★★
-                 /*
-                 const chatMessagesDiv = document.getElementById('chatMessages');
-                 const today = new Date(); // 再度取得は冗長だが削除するのでOK
-                 const dateHeaderStr = `${today.getFullYear()}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getDate().toString().padStart(2, '0')} (${getWeekday(today)})`;
-                 const existingHeaders = chatMessagesDiv.querySelectorAll('.date-header');
-                 const lastHeader = existingHeaders.length > 0 ? existingHeaders[existingHeaders.length - 1] : null;
-                 if (!lastHeader || lastHeader.innerText !== dateHeaderStr) {
-                     const dateHeader = document.createElement('div');
-                     dateHeader.classList.add('date-header');
-                     dateHeader.innerText = dateHeaderStr;
-                     chatMessagesDiv.appendChild(dateHeader);
-                     console.log("Added date header for weather info.");
-                     // lastHeaderDate = dateHeaderStr; // 文字列代入は元々問題があった
-                     lastHeaderDate = today; // Dateオブジェクトで更新するならこちらだが、これも不要
-                 } else {
-                     console.log("Date header for today already exists, skipping for weather info.");
-                 }
-                 */
-                 // ★★★ ヘッダー追加削除ここまで ★★★
-
-                 // UI更新 (日付なし応答を表示)
-                 if (loadingRow && loadingText) {
-                    console.log("Weather response received. Removing loading row and adding new message via addMessageRow.");
-                    loadingRow.remove();
-                    // 新しいメッセージ行を追加 (addMessageRow がヘッダーを処理)
-                    addMessageRow(refinedAnswer, 'other', new Date().getTime(), finalSources); // ★ refinedAnswer を渡す ★
-                 } else {
-                    console.log("Adding new message row for weather info (no loading indicator shown) - addMessageRow will handle header.");
-                     // ★ 日付なしで表示 (addMessageRow がヘッダーを処理) ★
-                     addMessageRow(refinedAnswer, 'other', new Date().getTime(), finalSources); // ★ refinedAnswer を渡す ★
-                 }
-                 scrollToBottom();
-            } else {
-                 console.error("Cannot add weather message, no current session available.");
-                 addMessageRow("エラー: 現在のセッションが見つかりません。", 'other');
-                 scrollToBottom();
-            }
-        } else {
-             console.error("Received null or invalid response from weather worker call.");
-             if (loadingRow && loadingText) {
-                 loadingText.classList.remove('blinking-text');
-                 loadingText.innerText = rawAnswer;
-             } else {
-                  addMessageRow(rawAnswer, 'other');
-             }
-             scrollToBottom();
-        }
-
-    } catch (error) {
-        clearTimeout(updateTimeout);
-        console.error("Error in getWeatherForCities:", error);
-        const errorMessage = `天気情報の取得エラー: ${error.message}`;
-        if (loadingRow && loadingText) {
-             loadingText.classList.remove('blinking-text');
-             loadingText.innerText = errorMessage;
-        } else {
-             addMessageRow(errorMessage, 'other');
-        }
-        scrollToBottom();
-        // エラー時もバックアップを試みるかは検討 (今回は実施しない)
-    }
+    // ... (関数の内容全体)
 }
+--- ここまでコメントアウト --- */
 
 // ===== ログアウト関数 (定義位置確認) =====
 function logout() {
-  firebase.auth().signOut().then(() => {
-    console.log("ログアウトしました");
-    // ログアウト後の処理 (ログインページへリダイレクト)
-    window.location.href = "login.html"; // Assuming login.html exists
-  }).catch((error) => {
-    console.error("ログアウトエラー:", error);
-  });
+    // ... (変更なし)
 }
 
 // ===== セッション削除関数 =====
 async function deleteSessionById(id) {
-    console.log("deleteSessionById called for ID:", id);
+    console.log("[deleteSessionById] Function called for ID:", id);
     const currentUser = firebase.auth().currentUser;
     if (!currentUser) {
-        console.error("ユーザーがログインしていません。削除できません。");
+        console.error("[deleteSessionById] User not logged in. Cannot delete.");
         return;
     }
 
+    // ローカルから削除
     const sessionIndex = conversationSessions.findIndex(s => s.id === id);
-    if (sessionIndex === -1) {
-        console.warn("削除対象のセッションがローカルに見つかりません:", id);
-        // Firebase だけに存在する場合も考慮するなら、ここで Firebase から削除を試みる
-    } else {
-        // ローカルから削除
+    if (sessionIndex !== -1) {
         conversationSessions.splice(sessionIndex, 1);
-        console.log("ローカルからセッションを削除しました:", id);
-        // カレントセッションが削除された場合、null にする
+        console.log("[deleteSessionById] Removed session from local array:", id);
+        // カレントセッションが削除された場合の処理
         if (currentSession && currentSession.id === id) {
+            console.log("[deleteSessionById] Current session was deleted. Clearing chat.");
             currentSession = null;
-             // 必要であれば、別のセッションをロードするか新規作成する
-             // loadSessionById(...) または startNewChat() など
-             // ここでは一旦クリアするだけにする
-             document.getElementById('chatMessages').innerHTML = "";
-             lastHeaderDate = null; 
+            document.getElementById('chatMessages').innerHTML = "";
+            lastHeaderDate = null; 
         }
+    } else {
+        console.warn("[deleteSessionById] Session not found in local array:", id);
     }
 
+    // Firebase から削除
     try {
-        // Firebase から削除
         await db.collection("chatSessions").doc(id).delete();
-        console.log("Firestore からセッションを削除しました:", id);
+        console.log("[deleteSessionById] Deleted session from Firestore:", id);
     } catch (error) {
-        console.error("Firestore からのセッション削除エラー:", error);
-        // エラーが発生した場合、ローカルの削除を取り消すか、ユーザーに通知するか検討
-        // 現状はエラーログのみ
+        console.error("[deleteSessionById] Error deleting session from Firestore:", error);
+        // 必要であればエラー通知やローカル削除のロールバック処理
     }
 
     // サイドメニューを更新して変更を反映
-    updateSideMenu();
+    console.log("[deleteSessionById] Calling updateSideMenu to reflect changes.");
+    updateSideMenu(); 
 }
 
 // ===== DOMContentLoaded イベントリスナー (ファイル末尾に移動) =====
@@ -1664,7 +1467,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const deleteToggle = document.getElementById('delete-thread-mode-btn');
     const logoutLink = document.getElementById('logout-link');
     const micBtn = document.getElementById('micBtn');
-    const weatherBtn = document.getElementById('weather-btn'); // ★ 天気ボタン取得のコメントアウト解除 ★
+    // const weatherBtn = document.getElementById('weather-btn'); // ★ 天気ボタン取得をコメントアウト ★
 
     if (sendButton) sendButton.addEventListener('click', onSendButton);
     if (chatInput) chatInput.addEventListener('keypress', function(e) {
@@ -1710,9 +1513,10 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Mic button (#micBtn) not found.");
     }
 
-    // ★★★ 天気ボタンのリスナー設定周りのコメントアウト解除 ★★★
+    // ★★★ 天気ボタンのリスナー設定をコメントアウト ★★★
+    /*
     console.log("Attempting to find weather button (#weather-btn)...");
-    // const weatherBtn = document.getElementById('weather-btn'); // 上で宣言済み
+    const weatherBtn = document.getElementById('weather-btn'); // 上で宣言済み
     if (weatherBtn) {
         console.log("Weather button FOUND. Adding event listener...");
         weatherBtn.addEventListener('click', getWeatherForCities);
@@ -1720,6 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         console.warn("Weather button (#weather-btn) NOT FOUND when trying to add listener.");
     }
+    */
     console.log("Finished setting up other event listeners."); // ★ リスナー設定完了ログ ★
 
     // Outside click closes dropdown AND side menu

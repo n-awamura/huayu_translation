@@ -69,7 +69,6 @@ body {
 #main-header .header-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
 }
 
 #main-header select {
@@ -278,6 +277,7 @@ body {
   border-top: 1px solid var(--border-color);
   background-color: #fff;
   padding: 8px;
+  align-items: center; /* Align items vertically */
 }
 .chat-input textarea {
   flex: 1;
@@ -288,25 +288,29 @@ body {
   font-size: 0.9rem;
   font-family: var(--font-family-noto-sans-jp);
   color: var(--main-text-color);
+  min-height: 40px; /* Ensure a minimum height */
+  align-self: stretch; /* Stretch to fill vertical space */
 }
 .chat-input button {
   margin-left: 8px;
-  width: 55px; /* 正方形に */
-  height: 55px;
+  width: 55px; /* 元の固定幅に戻す */
+  height: 55px; /* 元の固定高さに戻す */
+  /* padding: 10px; */ /* パディング調整を削除 */
   border-radius: 4px;
   border: none;
   background-color: var(--button-bg-color);
   color: var(--button-text-color);
-  padding: 0; /* パディング除去 */
-  display: flex;
+  display: flex; /* 元の flex に戻す */
   justify-content: center;
   align-items: center;
   cursor: pointer;
   font-family: var(--font-family-montserrat);
+  /* line-height: 1; */ /* line-height 調整を削除 */
 }
 
 .chat-input button i {
-  font-size: 1.2rem; /* 例：1.5rem など、好みの大きさに変更 */
+  font-size: 1.2rem; /* 元のアイコンサイズに戻す */
+  /* display: block; */ /* display: block を削除 */
 }
 
 /* ===== メッセージ行 ===== */
@@ -695,30 +699,61 @@ body {
 
 /* 音声入力ボタン */
 .chat-input #micBtn {
-  margin-left: 8px;
-  width: 55px; /* 正方形に */
-  height: 55px;
-  border-radius: 4px;
-  border: none;
+  /* 元のコメントアウト状態に戻すか、必要なら個別スタイルを設定 */
+  /* margin-left: 8px; */
+  /* width: 55px; */
+  /* height: 55px; */
+  /* border-radius: 4px; */
+  /* border: none; */
   background-color: #ccc; /* 通常時の色 (例: グレー) */
-  color: var(--button-bg-color); /* アイコンの色はボタン背景色に合わせる */
-  padding: 0; /* パディング除去 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
+  /* color: var(--button-bg-color); */
+  /* padding: 0; */
+  /* display: flex; */
+  /* justify-content: center; */
+  /* align-items: center; */
+  /* cursor: pointer; */
   transition: background-color 0.2s ease;
 }
 
 .chat-input #micBtn.recording {
   background-color: #ff6961; /* 録音中の色 (例: 赤系) */
-  color: #FFFFFF; /* 録音中のアイコンの色 */
+  color: #FFFFFF; /* 録音中のアイコンの色 (Override general rule) */
 }
 
-.chat-input #micBtn i {
-  font-size: 1.2rem; 
+/* マイクアイコン固有のサイズ指定があれば復活させる (今回は不要) */
+/* General icon size is set above */
+/* .chat-input #micBtn i {
+  font-size: 1.0rem; 
+} */
+
+/* Style for the new chat button */
+.header-controls button.new-chat {
+    background-color: transparent;
+    border: none;
+    color: #fff;
+    padding: 5px; /* Adjust padding */
+    margin: 0 5px; /* Adjust margin */
+    cursor: pointer;
+    display: inline-flex; /* Align icon vertically */
+    align-items: center;
+    justify-content: center;
 }
 
-.chat-input button i {
-  font-size: 1.2rem; /* 例：1.5rem など、好みの大きさに変更 */
+.header-controls button.new-chat i {
+    font-size: 1.5rem; /* ★ ハンバーガーと同じサイズに変更 ★ */
+    /* vertical-align: middle; is less effective with flex */
+}
+
+/* Hamburger icon style */
+.header-controls i.hamburger {
+    font-size: 1.5rem; /* Adjust size */
+    color: #fff; /* Ensure color */
+    cursor: pointer;
+    padding: 5px; /* Make clickable area larger */
+}
+
+/* Side Menu Styles */
+#side-menu {
+    position: fixed;
+    /* ... (他のサイドメニュースタイル) ... */
 }

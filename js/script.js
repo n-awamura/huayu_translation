@@ -809,6 +809,8 @@ function addMessageRowToElement(parentElement, text, sender, timestamp, sources)
             btn.dataset.listenerAttached = 'true';
         }
     });
+
+    adjustSpeechBubbleFontSize();
 }
 
 // ★ buildRefinementPrompt の修正 (台湾華語モードを考慮) ★
@@ -954,6 +956,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainContent = document.querySelector('.chat-container');
         const headerControls = document.querySelector('#main-header .header-controls'); // ★ ここで取得
         const sideMenu = document.getElementById('side-menu');
+
+        setAppHeight(); // ★ 認証状態変更時にも高さを設定 ★
 
         if (user) {
             // ★ ログイン時のログを追加 ★
@@ -1136,6 +1140,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize speech recognition (if available)
     initializeSpeechRecognition();
+
+    // --- アプリケーションの高さ設定リスナー ---
+    window.addEventListener('resize', setAppHeight);
+    // 初期ロード時にも実行
+    setAppHeight();
 
     // --- 象の画像クリックイベントリスナー (復活/確認) ---
     const elephantImg = document.getElementById("elephantImg");
@@ -1442,4 +1451,11 @@ function parseDateString(dateString) {
 
   console.warn("Unsupported or ambiguous date string format for parseDateString:", dateString);
   return null;
+}
+
+// ===== アプリケーションの高さを設定する関数 =====
+function setAppHeight() {
+  const doc = document.documentElement;
+  doc.style.setProperty('--app-height', `${window.innerHeight}px`);
+  console.log(`App height set to: ${window.innerHeight}px`); // デバッグ用ログ
 }

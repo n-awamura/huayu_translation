@@ -23,9 +23,9 @@
   /* --active-link-bg-color: #4682B4; */
   /* --active-link-text-color: #fff; */
   /* --light-blue-gray: #d8dbe0; */
-  /* --very-light-blue-gray: #f0f4f8; */ 
+  /* --very-light-blue-gray: #f0f4f8;  */
   /* --heading-bg-color: #e6e9ed; */
-  /* --border-color: #94a9b8; */ 
+  /* --border-color: #94a9b8;  */
   --font-family-montserrat: "Montserrat", sans-serif;
   --font-family-noto-sans-jp: "Noto Sans JP", sans-serif;
 }
@@ -36,7 +36,8 @@ body {
   padding: 0;
   background-color: var(--chat-bg-color); 
   font-family: var(--font-family-noto-sans-jp);
-  height: 100vh; /* 追加: bodyの高さをビューポートいっぱいに */
+  /* height: 100vh; */ /* 変更: CSSカスタムプロパティを使用 */
+  height: var(--app-height, 100vh); /* 変更: フォールバックとして100vhを指定 */
   display: flex; /* 追加: body を flex コンテナに */
   flex-direction: column; /* 追加: 子要素を縦に並べる */
 }

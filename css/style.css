@@ -36,6 +36,13 @@ body {
   padding: 0;
   background-color: var(--chat-bg-color); 
   font-family: var(--font-family-noto-sans-jp);
+  height: 100vh; /* 追加: bodyの高さをビューポートいっぱいに */
+  display: flex; /* 追加: body を flex コンテナに */
+  flex-direction: column; /* 追加: 子要素を縦に並べる */
+}
+
+html {
+  height: 100%; /* 追加: htmlの高さをビューポートいっぱいに */
 }
 
 /* ===== ヘッダー ===== */
@@ -254,7 +261,8 @@ body {
 .chat-container {
   max-width: 375px;
   width: 100%;
-  height: calc(100vh - 50px);
+  /* height: calc(100vh - 50px); */ /* この行をコメントアウトまたは削除 */
+  flex-grow: 1; /* 追加: body の残りの高さを埋める */
   margin: 0 auto;
   display: flex;
   flex-direction: column;

@@ -513,7 +513,7 @@ async function updateSideMenuFromFirebase(loadMore = false) {
             createdAtDate = new Date(0);
         }
       } else {
-        createdAtDate = new Date(0); // createdAt がない場合はエポック
+        createdAtDate = new Date(0); // createdAt がない場合はエポックく
       }
 
       newSessions.push({

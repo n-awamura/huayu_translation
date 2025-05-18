@@ -1,18 +1,18 @@
 // ==============================
 // グローバル変数
 // ==============================
-let conversationSessions = []; 
-let currentSession = null;     
+// let conversationSessions = []; 
+// let currentSession = null;     
 let lastHeaderDate = null;   // ★ 最後にヘッダーを表示した日付 (Date オブジェクト)
-let isDeleteMode = false; // 追加: 削除モードの状態
+// let isDeleteMode = false; // 追加: 削除モードの状態
 let recognition = null; // 追加: SpeechRecognition インスタンス
 let isRecording = false; // 追加: 録音状態フラグ
-let isCreatingNewSession = false; // ★ New Chat 連打防止フラグ
+// let isCreatingNewSession = false; // ★ New Chat 連打防止フラグ
 let firebaseUiInitialized = false; // ★ FirebaseUI 初期化済みフラグを追加 ★
-let lastVisibleDocFromFirestore = null; // ★ ページネーション用: 最後に読み込んだFirestoreドキュメント ★
-let allHistoryLoaded = false; // ★ ページネーション用: 全履歴読み込み完了フラグ ★
-const INITIAL_LOAD_COUNT = 10; // ★ ページネーション用: 初期読み込み件数 ★
-const LOAD_MORE_COUNT = 5; // ★ ページネーション用: 追加読み込み件数 ★
+// let lastVisibleDocFromFirestore = null; // ★ ページネーション用: 最後に読み込んだFirestoreドキュメント ★
+// let allHistoryLoaded = false; // ★ ページネーション用: 全履歴読み込み完了フラグ ★
+// const INITIAL_LOAD_COUNT = 10; // ★ ページネーション用: 初期読み込み件数 ★
+// const LOAD_MORE_COUNT = 5; // ★ ページネーション用: 追加読み込み件数 ★
 
 // ==============================
 // ユーティリティ関数
@@ -119,7 +119,7 @@ function processMarkdownSegment(segment) {
 
 function addMessageRow(text, sender, timestamp = null, sources = null) {
     console.log("--- addMessageRow Start ---");
-    console.log("Original Text:", text);
+    console.log("Original Text:", text); // Removed isThinking parameter
     // sources はコンソールにはログ出力するが、表示しない
     if (sources) {
         console.log("Received Sources (Hidden from UI):", sources);
@@ -183,63 +183,87 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     const bubbleText = document.createElement('div');
     bubbleText.classList.add('bubble-text');
 
-    // --- Text Processing --- (Revised Flow for Code Blocks) ---
-    const originalTextForCopy = text;
-    const codeBlocks = []; // Keep track of code blocks separately if needed later
-    const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g; // FIX: Allow whitespace after lang name
-    let lastIndex = 0;
-    let match;
-    let blockIndex = 0;
-    const segments = []; // Array to hold alternating text and code block objects
+    // if (isThinking) { // 「考え中」メッセージの専用ロジックを削除
+    //     // 「考え中」メッセージの場合、text をそのまま innerHTML として設定
+    //     bubbleText.innerHTML = text;
+    // } else {
+        // --- Text Processing --- (Revised Flow for Code Blocks) ---
+        const originalTextForCopy = text;
+        const codeBlocks = []; // Keep track of code blocks separately if needed later
+        const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g; // FIX: Allow whitespace after lang name
+        let lastIndex = 0;
+        let match;
+        let blockIndex = 0;
+        const segments = []; // Array to hold alternating text and code block objects
 
-    // 1. Extract Code Blocks and Identify Text Segments
-    while ((match = codeBlockRegex.exec(text)) !== null) {
-        // Add text segment before the code block
-        if (match.index > lastIndex) {
-            segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+        // 1. Extract Code Blocks and Identify Text Segments
+        while ((match = codeBlockRegex.exec(text)) !== null) {
+            // Add text segment before the code block
+            if (match.index > lastIndex) {
+                segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+            }
+
+            // Add code block segment
+            const lang = match[1] || 'plaintext';
+            const code = match[2];
+            segments.push({ type: 'code', lang: lang, content: code, index: blockIndex });
+            codeBlocks.push({ lang, code }); // Optional: Store extracted code blocks
+
+            lastIndex = codeBlockRegex.lastIndex; // Update index for next segment
+            blockIndex++;
+        }
+        // Add the remaining text segment after the last code block
+        if (lastIndex < text.length) {
+            segments.push({ type: 'text', content: text.substring(lastIndex) });
         }
 
-        // Add code block segment
-        const lang = match[1] || 'plaintext';
-        const code = match[2];
-        segments.push({ type: 'code', lang: lang, content: code, index: blockIndex });
-        codeBlocks.push({ lang, code }); // Optional: Store extracted code blocks
+        console.log("Processed Segments (Text/Code):", segments);
 
-        lastIndex = codeBlockRegex.lastIndex; // Update index for next segment
-        blockIndex++;
-    }
-    // Add the remaining text segment after the last code block
-    if (lastIndex < text.length) {
-        segments.push({ type: 'text', content: text.substring(lastIndex) });
-    }
-
-    console.log("Processed Segments (Text/Code):", segments);
-
-    // 2. Process Segments and Build Final HTML
-    let finalHtml = '';
-    segments.forEach(segment => {
-        if (segment.type === 'text') {
-            // Process the text segment using the markdown helper
-             if (segment.content && segment.content.trim()) { // Avoid processing empty/whitespace segments
-                 finalHtml += processMarkdownSegment(segment.content);
-             }
-        } else if (segment.type === 'code') {
-            // Generate HTML for the code block
-            const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
-            const escapedCode = escapeHtml(segment.content.trim()); // Trim code before escaping
-            // FIX: Move button inside <pre>
-            const codeBlockHtml = `<div class="code-block-container">
-                                    <pre>
+        // 2. Process Segments and Build Final HTML
+        let finalHtml = '';
+        segments.forEach(segment => {
+            if (segment.type === 'text') {
+                // Process the text segment using the markdown helper
+                 if (segment.content && segment.content.trim()) { // Avoid processing empty/whitespace segments
+                     finalHtml += processMarkdownSegment(segment.content);
+                 }
+            } else if (segment.type === 'code') {
+                // Generate HTML for the code block
+                const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
+                const escapedCode = escapeHtml(segment.content.trim()); // Trim code before escaping
+                // FIX: Move button inside <pre>
+                const codeBlockHtml = `<div class="code-block-container">
+                                        <pre>
 <button class="copy-code-btn" data-clipboard-target="#${codeId}" title="コードをコピー"><i class="bi bi-clipboard"></i></button>
 <code id="${codeId}" class="language-${segment.lang}">${escapedCode}</code>
 </pre>
-                                  </div>`;
-            finalHtml += codeBlockHtml; // Add code block HTML directly
-        }
-    });
+                                      </div>`;
+                finalHtml += codeBlockHtml; // Add code block HTML directly
+            }
+        });
 
-    console.log("Final HTML with Code Blocks Correctly Interleaved:", finalHtml);
-    bubbleText.innerHTML = finalHtml; // Set the final HTML
+        console.log("Final HTML with Code Blocks Correctly Interleaved:", finalHtml);
+        bubbleText.innerHTML = finalHtml; // Set the final HTML
+
+        // --- Message Copy Button (通常のメッセージにのみ追加) ---
+        const copyMsgBtn = document.createElement('button');
+        copyMsgBtn.classList.add('copy-msg-btn');
+        copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+        copyMsgBtn.title = 'メッセージをコピー';
+        copyMsgBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(originalTextForCopy)
+                .then(() => {
+                    copyMsgBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                    copyMsgBtn.title = 'コピーしました';
+                    setTimeout(() => {
+                        copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+                        copyMsgBtn.title = 'メッセージをコピー';
+                    }, 1500);
+                })
+                .catch(err => console.error('コピー失敗:', err));
+        });
+        bubble.appendChild(copyMsgBtn); // Copy button inside bubble
+    // } // elseブロックを削除
 
     // --- Timestamp Creation ---
     const bubbleTime = document.createElement('div');
@@ -250,31 +274,10 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     bubbleTime.innerText = `${hours}:${minutes}`;
     console.log("Created Timestamp element:", bubbleTime.innerText);
 
-
-    // --- Message Copy Button ---
-    const copyMsgBtn = document.createElement('button');
-    copyMsgBtn.classList.add('copy-msg-btn');
-    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
-    copyMsgBtn.title = 'メッセージをコピー';
-    copyMsgBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(originalTextForCopy)
-            .then(() => {
-                copyMsgBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
-                copyMsgBtn.title = 'コピーしました';
-                setTimeout(() => {
-                    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
-                    copyMsgBtn.title = 'メッセージをコピー';
-                }, 1500);
-            })
-            .catch(err => console.error('コピー失敗:', err));
-    });
-
-
     // Append elements to bubble
     bubble.appendChild(bubbleText);
-    bubble.appendChild(copyMsgBtn); // Copy button inside bubble
     bubble.appendChild(bubbleTime); // Timestamp inside bubble
-    console.log("Appended text, copy button, and timestamp to bubble.");
+    console.log("Appended text and timestamp to bubble.");
 
     // Append bubble to row (grounding の後に追加するように変更)
     row.appendChild(bubble); 
@@ -283,55 +286,57 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     chatMessagesDiv.appendChild(row);
     console.log("Appended row to chat messages div.");
 
-    // --- Highlight Code Blocks using Prism.js --- (修正: 同期的に実行)
-    console.log("Executing Prism.highlightAllUnder...");
-    try {
-        // Ensure Prism is loaded before calling this
-        if (typeof Prism !== 'undefined') {
-            Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
-            console.log("Prism highlighting finished.");
-        } else {
-            console.warn("Prism object not found, skipping highlighting.");
+    // if (!isThinking) {
+        // --- Highlight Code Blocks using Prism.js --- (修正: 同期的に実行)
+        console.log("Executing Prism.highlightAllUnder...");
+        try {
+            // Ensure Prism is loaded before calling this
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
+                console.log("Prism highlighting finished.");
+            } else {
+                console.warn("Prism object not found, skipping highlighting.");
+            }
+        } catch (e) {
+            console.error("Error during Prism highlighting:", e);
         }
-    } catch (e) {
-        console.error("Error during Prism highlighting:", e);
-    }
 
-    // --- Code Block Copy Listener (Re-added) ---
-    bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
-        if (!btn.dataset.listenerAttached) {
-            btn.addEventListener('click', (event) => {
-                const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
-                const codeElement = document.querySelector(targetSelector);
-                if (codeElement) {
-                    // Copy the *unescaped* text content for code blocks
-                    navigator.clipboard.writeText(codeElement.textContent)
-                        .then(() => {
-                            const buttonElement = event.target.closest('button');
-                            buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
-                            buttonElement.title = 'コピーしました';
-                            setTimeout(() => {
-                                buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
-                                buttonElement.title = 'コードをコピー';
-                            }, 1500);
-                        })
-                        .catch(err => console.error('コードのコピー失敗:', err));
-                }
-            });
-            btn.dataset.listenerAttached = 'true';
-             // Assuming button HTML is generated with icon & title
-        }
-    });
-
+        // --- Code Block Copy Listener (Re-added) ---
+        bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
+            if (!btn.dataset.listenerAttached) {
+                btn.addEventListener('click', (event) => {
+                    const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
+                    const codeElement = document.querySelector(targetSelector);
+                    if (codeElement) {
+                        // Copy the *unescaped* text content for code blocks
+                        navigator.clipboard.writeText(codeElement.textContent)
+                            .then(() => {
+                                const buttonElement = event.target.closest('button');
+                                buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
+                                buttonElement.title = 'コピーしました';
+                                setTimeout(() => {
+                                    buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
+                                    buttonElement.title = 'コードをコピー';
+                                }, 1500);
+                            })
+                            .catch(err => console.error('コードのコピー失敗:', err));
+                    }
+                });
+                btn.dataset.listenerAttached = 'true';
+                 // Assuming button HTML is generated with icon & title
+            }
+        });
+    // }
     console.log("--- addMessageRow End (Corrected Code Block Handling) ---");
 }
 
-function buildPromptFromHistory() {
-  if (!currentSession || !currentSession.messages?.length) return "";
-  return currentSession.messages
-    .map(m => `${m.sender}: ${m.text}`)
-    .join("\n");
-}
+// 履歴が不要なためコメントアウト
+// function buildPromptFromHistory() {
+//   if (!currentSession || !currentSession.messages?.length) return "";
+//   return currentSession.messages
+//     .map(m => `${m.sender}: ${m.text}`)
+//     .join("\n");
+// }
 
 /* 
 // 天気のAPI関連のコードは、グラウンディングで代替できるためコメントアウト
@@ -352,85 +357,22 @@ async function getWeatherInfoForCity(city) {
 }
 */
 
-async function endCurrentSession() {
-  if (!currentSession) return;
-  if (currentSession.sessionState === "finished") return;
-
-  if (currentSession.messages && currentSession.messages.length > 0) {
-    const newTitle = await summarizeSessionAsync(currentSession);
-    if (typeof newTitle === "string" && newTitle.trim() !== "") { // 空文字列でないことを確認
-      currentSession.title = newTitle;
-    } else {
-      currentSession.title = currentSession.title || "無題";
-    }
-  } else {
-    console.log("メッセージが空のため、要約は実施しません。");
-    currentSession.title = "無題";
-  }
-
-  currentSession.sessionState = "finished";
-  currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
-
-  const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-  if (sessionIndex > -1) {
-    conversationSessions[sessionIndex].title = currentSession.title;
-    conversationSessions[sessionIndex].updatedAt = currentSession.updatedAt; // Date オブジェクトをコピー
-    conversationSessions[sessionIndex].sessionState = currentSession.sessionState;
-    console.log(`Updated session ${currentSession.id} in local conversationSessions after endCurrentSession.`);
-  } else {
-    console.warn(`Session ${currentSession.id} not found in conversationSessions during endCurrentSession. This should not happen if createNewSession worked correctly.`);
-  }
-
-  await backupToFirebase(); // updatedAt は backupToFirebase 内で Timestamp に変換される
-  updateSideMenu();
-}
-
 async function onSendButton() {
   console.log("onSendButton called");
   const input = document.getElementById('chatInput');
   const message = input.value.trim();
   if (!message) return;
 
-  if (!currentSession) {
-    console.log("現在のセッションが存在しないため、新規セッションを作成します。");
-    await createNewSession(); 
-  }
-  
-  if (currentSession.sessionState !== "active") {
-    console.log("終了済みセッションを再利用するため、active に切り替えます。");
-    currentSession.sessionState = "active";
-  }
-  currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
-
   addMessageRow(message, 'self');
   input.value = '';
-  scrollToBottom();
+  scrollToBottom(); // ユーザーメッセージ追加後にスクロール
 
-  // currentSession.messages は createNewSession や loadSessionById で初期化されるか、
-  // 既存のものが使われる。常に配列であることを保証する。
-  if (!currentSession.messages) currentSession.messages = [];
-  currentSession.messages.push({
-    sender: 'User',
-    text: message,
-    timestamp: new Date()
-  });
+  // 一時的な「考え中」メッセージの追加処理を削除
+  // const thinkingBubbleId = `thinking-bubble-${Date.now()}`;
+  // addMessageRow("<div id='" + thinkingBubbleId + "' class='temp-thinking-message'>考え中だゾウ...</div>", 'other', new Date(), null, true);
+  // scrollToBottom(); // メッセージ追加後にスクロール
 
-  const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-  if (sessionIndex > -1) {
-    conversationSessions[sessionIndex].updatedAt = currentSession.updatedAt;
-    conversationSessions[sessionIndex].sessionState = currentSession.sessionState;
-    // conversationSessions[sessionIndex].messages も同期が必要な場合があるが、
-    // currentSession.messages と conversationSessions[sessionIndex].messages が
-    // 同じ配列を参照していれば不要。createNewSessionでコピーを作っているので注意が必要。
-    // 安全策として messages も同期するなら以下のようにする:
-    // conversationSessions[sessionIndex].messages = [...currentSession.messages]; 
-    // ただし、パフォーマンス影響と、参照を保ちたいケースとの兼ね合いを考慮。
-    // ここではupdatedAtとsessionStateのみ更新。
-  } else {
-      console.warn("[onSendButton] currentSession not found in conversationSessions. This might indicate an issue.");
-  }
-
-  await callGemini(message);
+  await callGemini(message); // thinkingBubbleId を渡さない
 }
 
 async function toggleSideMenu() {
@@ -444,456 +386,117 @@ async function toggleSideMenu() {
 }
 
 async function updateSideMenuFromFirebase(loadMore = false) {
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.log("updateSideMenuFromFirebase: User not logged in.");
-    return;
-  }
-  console.log(`updateSideMenuFromFirebase called, loadMore: ${loadMore}`);
-
-  try {
-    let query = firebase.firestore().collection('chatSessions')
-      .where('userId', '==', currentUser.uid)
-      .orderBy('updatedAt', 'desc')
-      .orderBy('createdAt', 'desc'); // ★ createdAt でのセカンダリソートを追加 ★
-
-    const countToLoad = loadMore ? LOAD_MORE_COUNT : INITIAL_LOAD_COUNT;
-
-    if (loadMore && lastVisibleDocFromFirestore) {
-      query = query.startAfter(lastVisibleDocFromFirestore);
-    } else if (!loadMore) {
-      lastVisibleDocFromFirestore = null; 
-      allHistoryLoaded = false; 
-      console.log("Initial load or refresh: lastVisibleDocFromFirestore reset.");
-    }
-
-    query = query.limit(countToLoad);
-
-    const snapshot = await query.get();
-
-    // ★ Firestoreから読み込む際は、一旦ローカルの conversationSessions をクリアするかどうかを loadMore フラグで制御する
-    // if (!loadMore) { // 初期読み込み、または「もっと見る」でない更新の場合
-    //    conversationSessions = []; 
-    //    console.log("Initial load or refresh: Cleared local conversationSessions.");
+    // const currentUser = firebase.auth().currentUser; // Authは使うがFirestoreは使わない
+    // if (!currentUser) {
+    //     console.log("updateSideMenuFromFirebase: User not logged in.");
+    //     return;
     // }
-    // ↑ Firestoreからのデータ取得前にローカルをクリアすると、currentSessionの扱いなどが複雑になるため、
-    //   マージ処理で対応する方針を維持。ただし、初期ロード時はクリアした方が良い場合もある。
-    //   現状の動作で問題なければこのまま。もし初期ロード時に古いデータが残る問題があれば再検討。
-    //   ログから、初期読み込み時には conversationSessions = []; されているので問題なさそう。
+    // console.log(`updateSideMenuFromFirebase called, loadMore: ${loadMore}`);
 
+    // try {
+        // let query = firebase.firestore().collection('chatSessions') // この行がエラーの原因
+        //   .where('userId', '==', currentUser.uid)
+        //   .orderBy('updatedAt', 'desc')
+        //   .orderBy('createdAt', 'desc'); 
 
-    const newSessions = [];
-    snapshot.forEach(doc => {
-      const sessionData = doc.data();
-      let updatedAtDate;
-      if (sessionData.updatedAt && typeof sessionData.updatedAt.toDate === 'function') {
-        updatedAtDate = sessionData.updatedAt.toDate();
-      } else if (sessionData.updatedAt instanceof Date) {
-        updatedAtDate = sessionData.updatedAt;
-      } else if (sessionData.updatedAt) {
-        updatedAtDate = new Date(sessionData.updatedAt);
-        if (isNaN(updatedAtDate.getTime())) {
-            console.warn(`Invalid date format for updatedAt: ${sessionData.updatedAt}, using epoch for session ID: ${doc.id}`);
-            updatedAtDate = new Date(0); 
-        }
-      } else {
-        updatedAtDate = new Date(0); 
-      }
+        // const countToLoad = loadMore ? LOAD_MORE_COUNT : INITIAL_LOAD_COUNT;
 
-      // createdAt も同様に Date オブジェクトに変換
-      let createdAtDate;
-      if (sessionData.createdAt && typeof sessionData.createdAt.toDate === 'function') {
-        createdAtDate = sessionData.createdAt.toDate();
-      } else if (sessionData.createdAt instanceof Date) {
-        createdAtDate = sessionData.createdAt;
-      } else if (sessionData.createdAt) {
-        createdAtDate = new Date(sessionData.createdAt);
-        if (isNaN(createdAtDate.getTime())) {
-            console.warn(`Invalid date format for createdAt: ${sessionData.createdAt}, using epoch for session ID: ${doc.id}`);
-            createdAtDate = new Date(0);
-        }
-      } else {
-        createdAtDate = new Date(0); // createdAt がない場合はエポックく
-      }
+        // if (loadMore && lastVisibleDocFromFirestore) {
+        //   query = query.startAfter(lastVisibleDocFromFirestore);
+        // } else if (!loadMore) {
+        //   lastVisibleDocFromFirestore = null; 
+        //   allHistoryLoaded = false; 
+        // }
 
-      newSessions.push({
-        id: doc.id,
-        ...sessionData,
-        updatedAt: updatedAtDate,
-        createdAt: createdAtDate, // ★ createdAt も Date オブジェクトとして保持 ★
-        messages: sessionData.messages || [] 
-      });
-    });
+        // query = query.limit(countToLoad);
+        // const snapshot = await query.get();
+        // const newSessions = [];
+        // snapshot.forEach(doc => { /* ... */ });
+        // conversationSessions 関連の処理もすべて削除
 
-    console.log(`Firestoreから ${newSessions.length} 件のセッションを取得しました。`);
-    if (newSessions.length > 0) {
-      console.log("Fetched sessions (up to 3 with full timestamps):", 
-        newSessions.slice(0, 3).map(s => 
-          ({
-            id: s.id, 
-            updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt, 
-            createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt, // この行を確実に含める
-            title: s.title 
-          })
-        )
-      );
+    // } catch (error) {
+    //     console.error("サイドメニュー更新エラー (Firestoreからの取得):", error);
+    // }
+    // updateSideMenu(); // この呼び出しも、この関数が単純化されるなら不要になるか、呼び出し元で制御
+
+    // 履歴機能は使わないので、固定表示にする
+    console.log("updateSideMenuFromFirebase called, displaying no history message.");
+    const historyDiv = document.getElementById('conversation-history');
+    if (historyDiv) {
+        historyDiv.innerHTML = '<li id="noSessionsMessage" style="padding: 10px; text-align: center; color: #888;">履歴機能はありません</li>';
     }
-
-    if (newSessions.length < countToLoad) {
-      allHistoryLoaded = true;
-      console.log("All chat history loaded from Firestore.");
+    // 「もっと見る」ボタンなども表示しない
+    const loadMoreButton = document.getElementById('loadMoreSessions'); // DOMにこのIDの要素がなければnull
+    if (loadMoreButton) {
+        loadMoreButton.style.display = 'none';
     }
-
-    if (snapshot.docs.length > 0) {
-      lastVisibleDocFromFirestore = snapshot.docs[snapshot.docs.length - 1];
-    } else if (loadMore) {
-      allHistoryLoaded = true;
-      console.log("Load more returned 0 docs, assuming all history loaded.");
-    }
-    
-    const sessionMap = new Map();
-    conversationSessions.forEach(s => sessionMap.set(s.id, s));
-    newSessions.forEach(s => sessionMap.set(s.id, s));
-    
-    // conversationSessions を更新する前に、currentSession があればその情報を最新に保つ
-    if (currentSession) {
-        const currentInNew = newSessions.find(s => s.id === currentSession.id);
-        if (currentInNew) {
-            // Firestore から来た新しいデータで currentSession の一部を更新
-            currentSession.title = currentInNew.title;
-            currentSession.updatedAt = currentInNew.updatedAt; // Date オブジェクト
-            currentSession.createdAt = currentInNew.createdAt; // Date オブジェクト
-            currentSession.sessionState = currentInNew.sessionState;
-            // messages はローカルのものを維持するか、状況に応じてマージ戦略を検討
-            // currentSession.messages = currentInNew.messages; (単純上書きの場合)
-            console.log(`[updateSideMenuFromFirebase] Updated currentSession (ID: ${currentSession.id}) with data from new fetch.`);
-        }
-        // currentSession が sessionMap にも含まれるようにする
-        // (ただし、上で更新した currentSession オブジェクトそのものを入れる)
-        sessionMap.set(currentSession.id, { ...currentSession });
-    }
-
-    conversationSessions = Array.from(sessionMap.values());
-    
-    // ソートはFirestoreクエリで行っているので、ここでは原則不要だが、
-    // currentSession の特別扱いなどで順序が変わる可能性があるため、
-    // updateSideMenu 側で最終的な表示順を制御する。
-    // ただし、基本的なソートはここでもかけておくと安定する。
-    conversationSessions.sort((a, b) => {
-      const updatedAtComparison = b.updatedAt.getTime() - a.updatedAt.getTime();
-      if (updatedAtComparison !== 0) {
-        return updatedAtComparison;
-      }
-      return b.createdAt.getTime() - a.createdAt.getTime();
-    });
-
-
-    // currentSession がFirestoreからのバッチに含まれていない場合でも、
-    // ローカルにcurrentSessionが存在し、それがアクティブならconversationSessionsの先頭に追加する
-    // (このロジックは updateSideMenu 側と重複する可能性があるので、どちらで主に行うか検討)
-    // 現状の updateSideMenu のロジックで currentSession は特別扱いされるので、ここでは sessionMap を使ったマージとソートに注力。
-    // 以下の FIX ロジックは sessionMap によるマージでカバーされるか確認。
-    /*
-    if (currentSession) {
-      const freshCurrentSessionFromFirestore = conversationSessions.find(s => s.id === currentSession.id);
-      if (freshCurrentSessionFromFirestore) {
-        // ... (Firestoreからのデータでローカルの currentSession を更新) ...
-      } else if (currentSession.sessionState === 'active' || (currentSession.title === "無題" && (!currentSession.messages || currentSession.messages.length === 0))) {
-        const currentIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-        if (currentIndex === -1) {
-            conversationSessions.unshift({ ...currentSession });
-            console.log("[FIX] Current active session (ID:", currentSession.id, ") was not in Firestore batch. Added it manually to conversationSessions.");
-        }
-      }
-    }
-    */
-    
-    // 再度ソート (updateSideMenu 側でのソートと役割分担を明確に)
-    // conversationSessions.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-    // → Firestore側でソートしているので、ここでは sessionMap からの復元時の順序維持で良いか、
-    //   もしくは明示的に再度ソートする。Firestoreのソート順を信頼する。
-
-  } catch (error) {
-    console.error("サイドメニュー更新エラー (Firestoreからの取得):", error);
-  }
-  updateSideMenu(); 
 }
 
 function updateSideMenu() {
-  console.log("updateSideMenu called, deleteMode=", isDeleteMode);
+  console.log("updateSideMenu called"); // isDeleteMode のログは削除
   const historyDiv = document.getElementById('conversation-history');
   historyDiv.innerHTML = ""; // クリア
 
-  if (isDeleteMode) {
-    historyDiv.classList.add('delete-mode');
-  } else {
-    historyDiv.classList.remove('delete-mode');
-  }
+  // if (isDeleteMode) { // isDeleteMode を使わない
+  //   historyDiv.classList.add('delete-mode');
+  // } else {
+  //   historyDiv.classList.remove('delete-mode');
+  // }
   
-  let sessionsToDisplay = [...conversationSessions];
-  
-  if (currentSession) {
-      const currentIndex = sessionsToDisplay.findIndex(s => s.id === currentSession.id);
-      if (currentIndex > -1) {
-          sessionsToDisplay.splice(currentIndex, 1); 
-      }
-      if (currentSession.title) { 
-          sessionsToDisplay.unshift(currentSession);
-      }
-  }
-  
-  sessionsToDisplay = sessionsToDisplay.filter((session, index, self) =>
-      index === self.findIndex((s) => (
-          s.id === session.id
-      ))
-  );
+  // conversationSessions 関連の処理はすべて削除
+  // let sessionsToDisplay = [...conversationSessions];
+  // if (currentSession) { /* ... */ }
+  // sessionsToDisplay = sessionsToDisplay.filter(/* ... */);
+  // finishedSessionsForDisplay.sort(/* ... */);
+  // finalSortedSessions = finalSortedSessions.concat(finishedSessionsForDisplay);
+  // finalSortedSessions = finalSortedSessions.filter(/* ... */);
+  // sessionsForDisplayHtml.forEach(session => { /* ... */ });
 
-  let finishedSessionsForDisplay = sessionsToDisplay.filter(s => !currentSession || s.id !== currentSession.id);
-  // finishedSessionsForDisplay.sort((a, b) => {
-  //   const updatedAtComparison = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  //   if (updatedAtComparison !== 0) {
-  //     return updatedAtComparison;
-  //   }
-  //   // updatedAtが同じ場合はcreatedAtで比較
-  //   return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  // });
-  finishedSessionsForDisplay.sort((a, b) => {
-    const aLatestActivity = Math.max(new Date(a.updatedAt).getTime(), new Date(a.createdAt).getTime());
-    const bLatestActivity = Math.max(new Date(b.updatedAt).getTime(), new Date(b.createdAt).getTime());
-    return bLatestActivity - aLatestActivity; // 降順ソート
-  });
+  // 「続けて5件見る」ボタンや「これ以上履歴はありません」の表示も削除
+  // if (!allHistoryLoaded && conversationSessions.length > 0) { /* ... */ }
 
-  let finalSortedSessions = [];
-  if (currentSession && currentSession.title) {
-      finalSortedSessions.push(currentSession);
-  }
-  finalSortedSessions = finalSortedSessions.concat(finishedSessionsForDisplay);
-  
-  finalSortedSessions = finalSortedSessions.filter(session => {
-      // 現在のセッションであれば、無題・空でも表示する
-      if (currentSession && session.id === currentSession.id) return true; 
-      
-      // それ以外のセッションは、無題かつメッセージが空の場合は非表示
-      const isEmpty = !session.messages || session.messages.length === 0;
-      const isUntitled = session.title === "無題";
-      return !(isEmpty && isUntitled);
-  });
-
-  // ★★★ デバッグログ追加 ★★★
-  console.log("Final sorted sessions to display in side menu (after filtering untitled/empty):", JSON.stringify(finalSortedSessions.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
-  // ★★★ ここまで ★★★
-
-  // ★★★ デバッグログ追加 ★★★ (ソート後の全件)
-  console.log("Sorted sessions before slicing:", JSON.stringify(finalSortedSessions.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
-  
-  const displayLimit = INITIAL_LOAD_COUNT; // または直接 10
-  const sessionsForDisplayHtml = finalSortedSessions.slice(0, displayLimit);
-
-  // ★★★ デバッグログ追加 ★★★ (スライス後の表示対象)
-  console.log(`Sessions to display in HTML (limited to ${displayLimit}):`, JSON.stringify(sessionsForDisplayHtml.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
-
-  sessionsForDisplayHtml.forEach(session => {
-    const link = document.createElement('a');
-    link.href = "#";
-    link.innerText = session.title || "無題"; // title が undefined の場合のフォールバック
-    link.style.display = "block";
-    link.style.position = "relative";
-    link.style.marginBottom = "5px";
-    link.style.padding = "5px 10px";
-    link.style.textDecoration = "none";
-    link.style.color = session.id === currentSession?.id ? "#87CEFA" : "#FFFFFF"; // アクティブなセッションを強調
-    if (session.id === currentSession?.id) {
-      link.style.fontWeight = "bold";
-    }
-
-    if (!isDeleteMode) {
-      link.addEventListener('click', e => {
-        e.preventDefault();
-        // conversationSessions に対象セッションがなければロードする処理は未実装
-        // 現状はメモリ上の conversationSessions から探す
-        loadSessionById(session.id); 
-        toggleSideMenu(); // メニューを閉じる
-      });
-    }
-
-    if (isDeleteMode) {
-      const deleteIcon = document.createElement('i');
-      deleteIcon.classList.add('bi', 'bi-trash', 'delete-thread-icon');
-      deleteIcon.addEventListener('click', (e) => {
-        console.log(`Delete icon clicked for session: ${session.id}`);
-        e.preventDefault();
-        e.stopPropagation();
-        deleteSessionById(session.id);
-      });
-      link.appendChild(deleteIcon);
-    }
-    historyDiv.appendChild(link);
-  });
-
-  // 「続けて5件見る」ボタンの追加
-  if (!allHistoryLoaded && conversationSessions.length > 0) { // 会話履歴が1件以上あり、全件ロードされていなければ表示
-    const loadMoreButton = document.createElement('button');
-    loadMoreButton.innerText = "続けて5件見る";
-    loadMoreButton.classList.add('load-more-btn'); // CSSでスタイルを調整するためクラス追加
-    loadMoreButton.addEventListener('click', () => {
-      console.log("「続けて5件見る」ボタンがクリックされました。");
-      updateSideMenuFromFirebase(true); // true を渡して追加読み込み
-    });
-    historyDiv.appendChild(loadMoreButton);
-  } else if (allHistoryLoaded && conversationSessions.length > 0) {
-    const noMoreHistory = document.createElement('p');
-    noMoreHistory.innerText = "これ以上履歴はありません";
-    noMoreHistory.classList.add('no-more-history'); // CSS用
-    historyDiv.appendChild(noMoreHistory);
+  // 履歴機能がないことを示すメッセージを再度表示（updateSideMenuFromFirebaseと重複するが、こちらでもUIを確定させる）
+  if (historyDiv) { // historyDiv が存在する場合のみ処理
+    const noSessionsMessage = document.createElement('li');
+    noSessionsMessage.id = 'noSessionsMessage';
+    noSessionsMessage.style.padding = '10px';
+    noSessionsMessage.style.textAlign = 'center';
+    noSessionsMessage.style.color = '#888'; // style.css の変数を使う方が望ましいが、一旦直接指定
+    noSessionsMessage.textContent = '履歴機能はありません';
+    historyDiv.appendChild(noSessionsMessage);
   }
 }
 
-function loadSessionById(id) {
-  console.log("loadSessionById called, id=", id);
-  const session = conversationSessions.find(s => s.id === id);
-  if (!session) return;
-
-  currentSession = session;
-
-  const chatMessagesDiv = document.getElementById('chatMessages');
-  chatMessagesDiv.innerHTML = "";
-  lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
-
-  (session.messages || []).forEach(item => {
-    // ... (Timestamp 変換処理)
-    if (item.timestamp && item.timestamp.seconds) {
-        item.timestamp = new Date(item.timestamp.seconds * 1000);
-    } else if (item.timestamp && typeof item.timestamp === 'string') {
-        // 文字列形式のタイムスタンプも Date オブジェクトに変換
-        try {
-            item.timestamp = new Date(item.timestamp);
-        } catch (e) {
-            console.warn("Failed to parse timestamp string:", item.timestamp, e);
-            item.timestamp = new Date(); // パース失敗時は現在時刻など
-        }
-    }
-    addMessageRow(
-      item.text,
-      item.sender === 'User' ? 'self' : 'other',
-      item.timestamp
-    );
-  });
-  scrollToBottom();
-}
+// loadSessionById 関数全体を削除
 
 async function startNewChat() {
   console.log("startNewChat called");
-  if (isCreatingNewSession) {
-    console.log("Already creating a new session, ignoring click.");
-    return;
-  }
-  isCreatingNewSession = true;
-  showThinkingIndicator(true);
+  showThinkingIndicator(true); // これはUI操作なので残す
 
   try {
-    if (currentSession && currentSession.sessionState === "active") {
-      await endCurrentSession();
-    }
-    
-    await createNewSession(); // currentSession と conversationSessions がここで更新される想定
-
-    console.log("New session created. Updating side menu immediately.");
-    updateSideMenu(); 
-    
-    console.log("Performing initial load for side menu from Firebase.");
-    await updateSideMenuFromFirebase(false); 
+    await createNewSession(); // createNewSessionはUIリセットのために呼び出す
 
   } catch (error) {
     console.error("Error starting new chat:", error);
   } finally {
     showThinkingIndicator(false);
-    isCreatingNewSession = false;
   }
 }
 
 async function createNewSession() {
-    const currentUser = firebase.auth().currentUser;
-    if (!currentUser) {
-        console.error("ユーザーがログインしていません。セッションを作成できません。");
-        return Promise.reject(new Error("User not logged in"));
-    }
-
-    // 既存の空でアクティブなセッションを探すロジックは現状維持
-    const existingEmptySession = conversationSessions.find(
-        s => s.userId === currentUser.uid &&
-             s.sessionState === "active" && 
-             (!s.messages || s.messages.length === 0)
-    );
-
-    if (existingEmptySession) {
-        console.log("既存の空のアクティブセッションを再利用します:", existingEmptySession.id);
-        currentSession = existingEmptySession;
-        currentSession.updatedAt = new Date(); 
-        document.getElementById('chatMessages').innerHTML = "";
-        lastHeaderDate = null;
-        scrollToBottom();
-        // ★ 既存セッションを再利用する場合も conversationSessions の先頭に持ってくるか、
-        //    updateSideMenu が currentSession を特別扱いするロジックに任せる。
-        //    ここでは conversationSessions は変更せず、updateSideMenu に任せる。
-        return Promise.resolve(); 
-    }
-
-    console.log("Creating a new session document in Firestore.");
-    const now = new Date();
-    const firestoreTimestampNow = firebase.firestore.Timestamp.fromDate(now);
-    const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
-    const sessionDataToSave = {
-        id: sessionId,
-        title: "無題",
-        messages: [],
-        createdAt: firestoreTimestampNow,
-        updatedAt: firestoreTimestampNow,
-        sessionState: "active",
-        userId: currentUser.uid
-    };
-    
-    // Firestore に保存するデータとは別に、ローカルで保持する用のデータを作成
-    const localSessionForCurrent = {
-        id: sessionId,
-        title: "無題",
-        messages: [],
-        createdAt: now, // Dateオブジェクト
-        updatedAt: now, // Dateオブジェクト
-        sessionState: "active",
-        userId: currentUser.uid
-    };
-
-    // ★★★ 変更点ここから ★★★
-    // currentSession をまず設定
-    currentSession = localSessionForCurrent;
-    
-    // conversationSessions の重複をチェックして、なければ先頭に追加
-    const existingIndexInCS = conversationSessions.findIndex(s => s.id === sessionId);
-    if (existingIndexInCS > -1) {
-        conversationSessions.splice(existingIndexInCS, 1); // 既存なら一度削除
-    }
-    conversationSessions.unshift({ ...localSessionForCurrent }); // 新しいセッションをローカルリストの先頭に追加
-    console.log(`New session ${sessionId} added to the beginning of local conversationSessions.`);
-    // ★★★ 変更点ここまで ★★★
-
+    console.log("Creating a new session (UI reset).");
     document.getElementById('chatMessages').innerHTML = "";
     lastHeaderDate = null;
-    scrollToBottom();
-
-    try {
-        await db.collection("chatSessions").doc(sessionId).set(sessionDataToSave);
-        console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
-    } catch (error) {
-        console.error("新規セッションのFirestore書き込みエラー:", error);
-        // エラー時は currentSession をnullに戻すか、前の状態に戻す
-        // conversationSessions からも削除する
-        const errorIndex = conversationSessions.findIndex(s => s.id === sessionId);
-        if (errorIndex > -1) {
-            conversationSessions.splice(errorIndex, 1);
-        }
-        currentSession = null; // または以前のセッション
-        throw error;
+    const chatInputElement = document.getElementById('chatInput'); // ID を 'chatInput' に変更
+    if (chatInputElement) { 
+        chatInputElement.value = ''; 
+        chatInputElement.focus();   
+    } else {
+        console.error("Element with ID 'chatInput' not found in createNewSession.");
     }
+    document.getElementById('chatHeaderTitle').textContent = 'TRANSLATION'; 
+    scrollToBottom();
+    return Promise.resolve(); 
 }
 
 // ===== API呼び出し関数 (Model Switcher のみ) =====
@@ -979,323 +582,234 @@ async function callGeminiSummary(prompt, retryCount = 0) {
 }
 
 // ===== メインの Gemini 呼び出し関数 =====
-async function callGemini(userInput) {
-    // showThinkingIndicator(true); // ← 既存の静的インジケーターは一旦コメントアウトするか、併用を検討
+async function callGemini(userInput) { // thinkingBubbleId パラメータを削除
+    // showThinkingIndicator(true); // ヘッダーの吹き出し操作は削除
+    console.log("callGemini called with input:", userInput);
 
-    const modelSelect = document.getElementById('model-select');
-    const selectedModelValue = modelSelect.value;
-    // const isGroundingModel = (selectedModelValue === 'gemini-1.5-pro' || selectedModelValue === 'gemini-2.0-flash'); // ★ 判定方法変更のため不要に
-    const isTaiwanMode = (selectedModelValue === 'gemini-1.5-pro-tw');
-
-    // ★ 考え中メッセージ表示の準備 (old.js から移植) ★
+    // old.js を参考に「考え中」メッセージの遅延表示ロジックを追加
     const chatMessagesDiv = document.getElementById('chatMessages');
-    const delayTime = 3000; // 3秒後に表示（6秒は少し長いかもしれないので調整）
-    let loadingRow = null;
-    let loadingText = null;
-    const updateTimeout = setTimeout(() => {
-        // 他のメッセージがまだなければインジケーターを追加
-        // (既に他のメッセージがあれば、すぐに応答が返ると期待し、ちらつき防止のため追加しないことも検討)
-        // もしくは、常に最後に追加するようにする
-        loadingRow = document.createElement('div');
-        loadingRow.classList.add('message-row', 'other');
+    const delayTime = 3000; 
+    let loadingRow = null; // 関数スコープの変数として宣言
+    let loadingTextElement = null; // bubble-text 要素を保持
 
-        const elephantIcon = document.createElement('img');
-        elephantIcon.classList.add('icon');
-        elephantIcon.src = 'img/elephant.png';
-        elephantIcon.alt = '象アイコン';
-        loadingRow.appendChild(elephantIcon);
+    const thinkingTimeoutId = setTimeout(() => {
+        loadingRow = document.createElement('div');
+        loadingRow.classList.add('message-row', 'other', 'thinking-row'); // thinking-row クラスを追加 (識別用)
+
+        const icon = document.createElement('img');
+        icon.classList.add('icon');
+        icon.src = 'img/elephant.png';
+        icon.alt = '相手アイコン';
+        loadingRow.appendChild(icon);
 
         const bubble = document.createElement('div');
         bubble.classList.add('bubble');
 
-        loadingText = document.createElement('div');
-        loadingText.classList.add('bubble-text', 'blinking-text');
-        loadingText.innerText = "考え中だゾウ...";
-        bubble.appendChild(loadingText);
+        loadingTextElement = document.createElement('div');
+        loadingTextElement.classList.add('bubble-text');
+        loadingTextElement.innerHTML = "<div class='temp-thinking-message'>考え中だゾウ...</div>"; // isThinkingフラグがなくなったため、直接HTMLを設定
+        loadingTextElement.classList.add('blinking-text'); // 点滅クラスを追加
+        bubble.appendChild(loadingTextElement);
+
+        // タイムスタンプも「考え中」メッセージに追加（API応答後に更新される）
+        const bubbleTime = document.createElement('div');
+        bubbleTime.classList.add('bubble-time');
+        const nowTime = new Date();
+        const hours = nowTime.getHours().toString().padStart(2, '0');
+        const minutes = nowTime.getMinutes().toString().padStart(2, '0');
+        bubbleTime.innerText = `${hours}:${minutes}`;
+        bubble.appendChild(bubbleTime);
 
         loadingRow.appendChild(bubble);
         chatMessagesDiv.appendChild(loadingRow);
         scrollToBottom();
-        console.log("Displayed '考え中だゾウ...' message.");
+        console.log("Displayed '考え中だゾウ...' message (delayed).");
     }, delayTime);
-    // ★ ここまで追加 ★
+
+
+    // プロンプトを調整
+    const characterPrompt = "あなたは親しみやすいゾウのキャラクターです。応答の語尾はすべて「だゾウ」で終えるようにしてください。キャラクター設定に関する言及は、応答に一切含めないでください。";
+    const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。
+その際、以下の点に注意して回答を生成してください。
+1. 主な翻訳をまず提示する。
+2. 次に、同じ意味合いで使える別の言い回しや類義表現を1～2個提示する。
+3. 最後に、提示した翻訳や言い回しについて、簡単な文法解説やニュアンスの違い、使われる場面などを補足説明する。`;
+    const combinedPrompt = `${characterPrompt}
+
+上記のキャラクター設定および以下の指示に従って、ユーザーの入力を翻訳・解説してください。
+
+${translationRequest}`;
+
+    console.log("Combined Prompt (sending to worker):", combinedPrompt);
+
+    // thinkingBubbleId に関連する処理を削除
+    // const thinkingBubbleContentElement = document.getElementById(thinkingBubbleId);
 
     try {
-        let targetModelForFirstCall = selectedModelValue;
-        let promptToSendForFirstCall = "";
-        let useGroundingForFirstCall = false;
-        let toolNameForGrounding = null;
+        const result = await callGeminiModelSwitcher(combinedPrompt, 'gemini-2.5-flash-preview-04-17');
+        clearTimeout(thinkingTimeoutId); // API応答が来たらタイマーを解除
 
-        console.log(`callGemini called`);
-        console.log(`Selected Model Value: ${selectedModelValue}`);
-        console.log(`Is Taiwan Mode?: ${isTaiwanMode}`);
-        // console.log(`Is Grounding Model?: ${isGroundingModel}`); // ★ 削除
-
-        // ★ モードに応じてパラメータを設定 (ノーマル = 1.5 Pro Grounding) ★
-        if (isTaiwanMode) {
-            // 台湾華語モード (第1段階: 翻訳のみ)
-            targetModelForFirstCall = 'gemini-1.5-pro'; // 翻訳自体は 1.5 Pro で良いか要検討
-            promptToSendForFirstCall = `「${userInput}」を台湾で使われる繁体字中国語（台湾華語）に自然に訳してください。`;
-            useGroundingForFirstCall = false;
-            toolNameForGrounding = null;
-            console.log(`Taiwan Mode - Translation Prompt: ${promptToSendForFirstCall}`);
-        } else if (selectedModelValue === 'gemini-1.5-pro') { // ★ 新しい「ノーマル」モード ★
-             promptToSendForFirstCall = buildPromptFromHistory();
-             useGroundingForFirstCall = true;
-             targetModelForFirstCall = 'gemini-1.5-pro'; // モデル指定
-             toolNameForGrounding = 'googleSearchRetrieval'; // ツール指定 (旧じっくりと同じ)
-             console.log(`Normal Mode (1.5 Pro / Grounding) - Prompt: ${promptToSendForFirstCall}, Tool: ${toolNameForGrounding}`);
-        } else {
-             // --- ここに来ることは想定しない (他のモードを追加する場合は処理を記述) ---
-             console.warn(`Unexpected model value: ${selectedModelValue}. Falling back to default behavior.`);
-             promptToSendForFirstCall = buildPromptFromHistory();
-             targetModelForFirstCall = 'gemini-1.5-pro'; // フォールバック先
-             useGroundingForFirstCall = true;
-             toolNameForGrounding = 'googleSearchRetrieval';
+        if (loadingRow && loadingRow.parentElement) { // 「考え中」メッセージが表示されていた場合
+            console.log("Replacing '考え中だゾウ...' message with actual response.");
+            // addMessageRowToElement を使って新しい行を生成し、置き換える
+            const newRowContainer = document.createElement('div'); // ダミーの親要素
+            addMessageRowToElement(newRowContainer, result.answer, 'other', new Date(), result.sources);
+            if (newRowContainer.firstChild) {
+                loadingRow.replaceWith(newRowContainer.firstChild);
+            } else {
+                console.error("Failed to create new message row for replacement. Removing thinking row.");
+                loadingRow.remove(); // 新しい行の作成に失敗したら、「考え中」行を削除
+                addMessageRow(result.answer || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources); // 通常通り追加
+            }
+        } else { // 「考え中」メッセージが表示される前に応答が来た場合
+            console.log("Response received before '考え中だゾウ...' timeout. Adding as new message.");
+            if (result && result.answer) {
+                 addMessageRow(result.answer, 'other', new Date(), result.sources);
+            } else {
+                 addMessageRow("翻訳結果がありませんでした。(No translation result) だゾウ", 'other');
+                 console.error("Translation result was empty or invalid:", result);
+            }
         }
-
-        console.log(`[DEBUG] Checking parameters before API call: useGrounding = ${useGroundingForFirstCall}, Tool name = ${toolNameForGrounding}`);
-        console.log(`Calling Model Switcher (Initial) with model: ${targetModelForFirstCall}, grounding: ${useGroundingForFirstCall}, tool: ${toolNameForGrounding}`);
-
-        // --- API 呼び出し --- 
-        const data = await callGeminiModelSwitcher(
-            promptToSendForFirstCall,
-            targetModelForFirstCall, 
-            useGroundingForFirstCall, 
-            toolNameForGrounding
-        );
-        
-        // ★ 考え中メッセージをクリア ★
-        clearTimeout(updateTimeout);
-        // showThinkingIndicator(false); // ← 既存のインジケーターも非表示
-
-        let finalAnswer = null;
-        let finalSources = null;
-
-        if (data && data.answer !== undefined) {
-            finalAnswer = data.answer;
-            finalSources = data.sources;
-            
-            // ★ 語尾変換処理 (Refinement) を復活 ★
-            const shouldRefine = true; 
-            if (shouldRefine) {
-                 console.log(`Generating refinement prompt for: ${finalAnswer}`);
-                 // buildRefinementPrompt は originalAnswer のみ受け取るように修正した想定
-                 const refinementPrompt = await buildRefinementPrompt("語尾変更", finalAnswer); 
-                 console.log('Building refinement prompt...');
-                 const refinementModel = 'gemini-2.0-flash';
-                 console.log(`Calling Model Switcher (Refinement) with model: ${refinementModel}, grounding: false`);
-                 try {
-                     // Refinement は Grounding なしで POST
-                     const refinementData = await callGeminiModelSwitcher(refinementPrompt, refinementModel, false, null);
-                     if (refinementData && refinementData.answer) {
-                         finalAnswer = refinementData.answer; // 語尾変換後の回答で上書き
-                         console.log('Refinement successful.');
-                     } else {
-                         console.warn('Refinement failed or returned no answer, using original answer.');
-                     }
-                 } catch (refinementError) {
-                      console.error("Error during refinement call:", refinementError);
-                      console.warn("Using original answer due to refinement error.");
-                 }
-            }
-
-            // ★ AIの応答をセッションデータに追加 ★
-            if (!currentSession.messages) currentSession.messages = [];
-            currentSession.messages.push({
-                sender: 'Gemini',
-                text: finalAnswer,
-                timestamp: new Date(),
-                sources: finalSources // sources は Refinement 前のものを保持
-            });
-            currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
-
-            const geminiSessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-            if (geminiSessionIndex > -1) {
-                conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                // conversationSessions[geminiSessionIndex].messages = [...currentSession.messages]; // 同様に検討
-            }
-
-            // ★ 最終的な回答を表示 (考え中メッセージを更新 or 新規追加) ★
-            if (loadingRow && loadingText) {
-                console.log("Updating '考え中だゾウ...' message with final answer.");
-                loadingText.classList.remove('blinking-text');
-                // loadingText の内容を finalAnswer で更新する前に、
-                // finalAnswer を addMessageRow と同様に HTML に変換する必要がある
-                // addMessageRow のロジックを再利用するか、簡略化する
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = processMarkdownSegment(finalAnswer); // Markdown処理だけ行う
-                // コードブロックなどの処理も必要なら addMessageRow のロジックを呼ぶ
-                loadingText.innerHTML = tempDiv.innerHTML; 
-                
-                // タイムスタンプを追加 (old.js のロジック参考に)
-                const existingBubble = loadingRow.querySelector('.bubble');
-                if (existingBubble) {
-                    const existingTime = existingBubble.querySelector('.bubble-time');
-                    if (existingTime) existingTime.remove(); // 古いタイムスタンプがあれば削除
-
-                    const finalBubbleTime = document.createElement('div');
-                    finalBubbleTime.classList.add('bubble-time');
-                    const finalNow = new Date(); // 応答表示時の時刻
-                    const finalHours = finalNow.getHours().toString().padStart(2, '0');
-                    const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
-                    finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
-                    existingBubble.appendChild(finalBubbleTime);
-                    
-                    // コピーボタンも必要なら追加
-                    // ...
-                    Prism.highlightAllUnder(existingBubble); // コードハイライトも忘れずに
-                }
-            } else {
-                console.log("Adding new message row for final answer (no loading indicator was shown).");
-                addMessageRow(finalAnswer, 'other', new Date().getTime(), finalSources);
-            }
-            scrollToBottom(); // ★ 表示後にスクロール ★
-
-            // ★★★ セッションタイトル要約とバックアップを成功ブロック内に移動 ★★★
-            if (currentSession && currentSession.title === "無題") {
-                console.log("Current session is untitled, attempting to summarize...");
-                summarizeSessionAsync(currentSession).then(async (summary) => {
-                     if (summary && summary !== "無題") {
-                         currentSession.title = summary;
-                         currentSession.updatedAt = new Date();  // ★ Date オブジェクトで設定 ★
-                         console.log("Session title updated by summary:", summary);
-
-                         const summarySessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-                         if (summarySessionIndex > -1) {
-                             conversationSessions[summarySessionIndex].title = currentSession.title;
-                             conversationSessions[summarySessionIndex].updatedAt = currentSession.updatedAt;
-                         }
-                         updateSideMenu();
-                         await backupToFirebase(); 
-                     } else {
-                         // タイトルが「無題」のまま or 要約失敗でも updatedAt は更新されているのでバックアップ
-                         currentSession.updatedAt = new Date(); //念のため最新に
-                         if (geminiSessionIndex > -1) { // summarizeSessionAsync の前の index を再利用
-                            conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                         }
-                         await backupToFirebase(); 
-                     }
-                }).catch(async (error) => {
-                     console.error("Background session summary failed:", error);
-                     currentSession.updatedAt = new Date(); // エラー時も updatedAt を更新してバックアップ
-                     if (geminiSessionIndex > -1) {
-                        conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                     }
-                     await backupToFirebase(); 
-                });
-            } else {
-                 // タイトルが既に存在する場合も updatedAt を更新してバックアップ
-                 currentSession.updatedAt = new Date();
-                 if (geminiSessionIndex > -1) {
-                    conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                 }
-                 await backupToFirebase(); 
-            }
-            // ★★★ 移動ここまで ★★★
-
-        } else { // data が不正だった場合
-            console.error("Received null or invalid response from initial worker call.");
-            if (loadingRow && loadingText) {
-                console.log("Updating '考え中だゾウ...' message with final answer.");
-                loadingText.classList.remove('blinking-text');
-                // loadingText の内容を finalAnswer で更新する前に、
-                // finalAnswer を addMessageRow と同様に HTML に変換する必要がある
-                // addMessageRow のロジックを再利用するか、簡略化する
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = processMarkdownSegment(finalAnswer); // Markdown処理だけ行う
-                // コードブロックなどの処理も必要なら addMessageRow のロジックを呼ぶ
-                loadingText.innerHTML = tempDiv.innerHTML; 
-                
-                // タイムスタンプを追加 (old.js のロジック参考に)
-                const existingBubble = loadingRow.querySelector('.bubble');
-                if (existingBubble) {
-                    const existingTime = existingBubble.querySelector('.bubble-time');
-                    if (existingTime) existingTime.remove(); // 古いタイムスタンプがあれば削除
-
-                    const finalBubbleTime = document.createElement('div');
-                    finalBubbleTime.classList.add('bubble-time');
-                    const finalNow = new Date(); // 応答表示時の時刻
-                    const finalHours = finalNow.getHours().toString().padStart(2, '0');
-                    const finalMinutes = finalNow.getMinutes().toString().padStart(2, '0');
-                    finalBubbleTime.innerText = `${finalHours}:${finalMinutes}`;
-                    existingBubble.appendChild(finalBubbleTime);
-                    
-                    // コピーボタンも必要なら追加
-                    // ...
-                    Prism.highlightAllUnder(existingBubble); // コードハイライトも忘れずに
-                }
-            } else {
-                console.log("Adding new message row for final answer (no loading indicator was shown).");
-                addMessageRow(finalAnswer, 'other', new Date().getTime(), finalSources);
-            }
-            scrollToBottom(); // ★ 表示後にスクロール ★
-
-            // ★★★ セッションタイトル要約とバックアップを成功ブロック内に移動 ★★★
-            if (currentSession && currentSession.title === "無題") {
-                console.log("Current session is untitled, attempting to summarize...");
-                summarizeSessionAsync(currentSession).then(async (summary) => {
-                     if (summary && summary !== "無題") {
-                         currentSession.title = summary;
-                         currentSession.updatedAt = new Date();  // ★ Date オブジェクトで設定 ★
-                         console.log("Session title updated by summary:", summary);
-
-                         const summarySessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-                         if (summarySessionIndex > -1) {
-                             conversationSessions[summarySessionIndex].title = currentSession.title;
-                             conversationSessions[summarySessionIndex].updatedAt = currentSession.updatedAt;
-                         }
-                         updateSideMenu();
-                         await backupToFirebase(); 
-                     } else {
-                         // タイトルが「無題」のまま or 要約失敗でも updatedAt は更新されているのでバックアップ
-                         currentSession.updatedAt = new Date(); //念のため最新に
-                         if (geminiSessionIndex > -1) { // summarizeSessionAsync の前の index を再利用
-                            conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                         }
-                         await backupToFirebase(); 
-                     }
-                }).catch(async (error) => {
-                     console.error("Background session summary failed:", error);
-                     currentSession.updatedAt = new Date(); // エラー時も updatedAt を更新してバックアップ
-                     if (geminiSessionIndex > -1) {
-                        conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                     }
-                     await backupToFirebase(); 
-                });
-            } else {
-                 // タイトルが既に存在する場合も updatedAt を更新してバックアップ
-                 currentSession.updatedAt = new Date();
-                 if (geminiSessionIndex > -1) {
-                    conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
-                 }
-                 await backupToFirebase(); 
-            }
-            // ★★★ 移動ここまで ★★★
-
-            // ★★★ ここにあったタイトル要約・バックアップ処理は上記 if ブロック内に移動した ★★★
-
-        }
-
     } catch (error) {
-        // ★ 考え中メッセージをクリア/エラー表示に更新 ★
-        clearTimeout(updateTimeout);
-        // showThinkingIndicator(false);
-        console.error("Error in callGemini:", error);
-        if (loadingRow && loadingText) {
-             loadingText.classList.remove('blinking-text');
-             loadingText.innerText = `エラーが発生しました: ${error.message}`;
+        console.error("Error calling Gemini for translation:", error);
+        clearTimeout(thinkingTimeoutId); // エラー時もタイマーを解除
+        if (loadingRow && loadingRow.parentElement) {
+            // 「考え中」メッセージをエラーメッセージで更新する、または削除して新しいエラーメッセージ行を追加
+            const bubbleTextDiv = loadingRow.querySelector('.bubble-text.blinking-text'); // 点滅クラスも考慮
+            if (bubbleTextDiv) {
+                bubbleTextDiv.classList.remove('blinking-text'); // 点滅を止める
+                bubbleTextDiv.innerHTML = `<div class='temp-thinking-message error-message'>翻訳中にエラーが発生しました: ${escapeHtml(error.message)} だゾウ</div>`;
+            } else {
+                loadingRow.remove();
+                addMessageRow(`翻訳中にエラーが発生しました: ${error.message}`, 'other');
+            }
         } else {
-             addMessageRow(`エラーが発生しました: ${error.message}`, 'other');
+            addMessageRow(`翻訳中にエラーが発生しました: ${error.message}`, 'other');
         }
-        // ★ エラー発生時もバックアップを試みる (エラー処理を追加) ★
-        try {
-            await backupToFirebase();
-        } catch (backupError) {
-            console.error("Backup failed after error in callGemini:", backupError);
+    } finally {
+        // showThinkingIndicator(false); // ヘッダーの吹き出し操作は削除
+        scrollToBottom(); // 応答表示後にスクロール
+    }
+}
+
+// addMessageRow の主要ロジックを要素に直接適用するヘルパー関数
+// (addMessageRowから呼び出されるマークダウン処理やハイライト処理なども考慮する必要がある)
+function addMessageRowToElement(parentElement, text, sender, timestamp, sources) {
+    // 既存の addMessageRow の message-row 作成以降のロジックをここに移動・調整
+    // sender, timestamp, sources は新しいメッセージ行に必要
+
+    const row = document.createElement('div');
+    row.classList.add('message-row', sender);
+    if (sender === 'other') {
+        const icon = document.createElement('img');
+        icon.classList.add('icon');
+        icon.src = 'img/elephant.png';
+        icon.alt = '相手アイコン';
+        row.appendChild(icon);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.classList.add('bubble');
+    const bubbleText = document.createElement('div');
+    bubbleText.classList.add('bubble-text');
+
+    // Text Processing (addMessageRowから抜粋)
+    const originalTextForCopy = text; // コピーボタン用
+    let finalHtml = '';
+    const segments = [];
+    const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+    let blockIndex = 0; 
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
         }
-    } // ← この閉じ括弧が callGemini 関数の try...catch ブロック全体を閉じるもの
-} // ← この閉じ括弧が callGemini 関数自体を閉じるもの (これが不足している可能性)
+        segments.push({ type: 'code', lang: match[1] || 'plaintext', content: match[2], index: blockIndex });
+        lastIndex = codeBlockRegex.lastIndex;
+        blockIndex++;
+    }
+    if (lastIndex < text.length) {
+        segments.push({ type: 'text', content: text.substring(lastIndex) });
+    }
+
+    segments.forEach(segment => {
+        if (segment.type === 'text') {
+            if (segment.content && segment.content.trim()) {
+                finalHtml += processMarkdownSegment(segment.content);
+            }
+        } else if (segment.type === 'code') {
+            const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
+            const escapedCode = escapeHtml(segment.content.trim());
+            finalHtml += `<div class="code-block-container"><pre><button class="copy-code-btn" data-clipboard-target="#${codeId}" title="コードをコピー"><i class="bi bi-clipboard"></i></button><code id="${codeId}" class="language-${segment.lang}">${escapedCode}</code></pre></div>`;
+        }
+    });
+    bubbleText.innerHTML = finalHtml;
+
+    // --- Message Copy Button ---
+    const copyMsgBtn = document.createElement('button');
+    copyMsgBtn.classList.add('copy-msg-btn');
+    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+    copyMsgBtn.title = 'メッセージをコピー';
+    copyMsgBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(originalTextForCopy)
+            .then(() => {
+                copyMsgBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                copyMsgBtn.title = 'コピーしました';
+                setTimeout(() => {
+                    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+                    copyMsgBtn.title = 'メッセージをコピー';
+                }, 1500);
+            })
+            .catch(err => console.error('コピー失敗:', err));
+    });
+    bubble.appendChild(copyMsgBtn);
+
+    // --- Timestamp Creation ---
+    const bubbleTime = document.createElement('div');
+    bubbleTime.classList.add('bubble-time');
+    const nowTime = timestamp ? new Date(timestamp) : new Date();
+    const hours = nowTime.getHours().toString().padStart(2, '0');
+    const minutes = nowTime.getMinutes().toString().padStart(2, '0');
+    bubbleTime.innerText = `${hours}:${minutes}`;
+    
+    bubble.appendChild(bubbleText);
+    bubble.appendChild(bubbleTime);
+    row.appendChild(bubble);
+
+    // Append row to the parent element provided
+    parentElement.appendChild(row);
+
+    // --- Highlight Code Blocks using Prism.js ---
+    if (typeof Prism !== 'undefined') {
+        Prism.highlightAllUnder(bubble); 
+    }
+
+    // --- Code Block Copy Listener ---
+    bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
+        if (!btn.dataset.listenerAttached) {
+            btn.addEventListener('click', (event) => {
+                const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
+                const codeElement = document.querySelector(targetSelector);
+                if (codeElement) {
+                    navigator.clipboard.writeText(codeElement.textContent)
+                        .then(() => {
+                            const buttonElement = event.target.closest('button');
+                            buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
+                            buttonElement.title = 'コピーしました';
+                            setTimeout(() => {
+                                buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
+                                buttonElement.title = 'コードをコピー';
+                            }, 1500);
+                        })
+                        .catch(err => console.error('コードのコピー失敗:', err));
+                }
+            });
+            btn.dataset.listenerAttached = 'true';
+        }
+    });
+}
 
 // ★ buildRefinementPrompt の修正 (台湾華語モードを考慮) ★
 async function buildRefinementPrompt(context, originalAnswer) {
@@ -1311,170 +825,7 @@ ${originalAnswer}
 }
 
 async function summarizeSessionAsync(session) {
-  const allText = (session.messages || []).map(m => m.text).join(" ");
-  if (!allText) return session.title;
-  
-  const prompt = `以下の会話を15文字程度で自然なタイトルに要約してください。タイトルの前後に記号（括弧を含む）は一切付けないでください。\n${allText}`;
-  const summaryObj = await callGeminiSummary(prompt);
-
-  let summary = summaryObj?.answer;
-  if (typeof summary !== "string") {
-    summary = "無題";
-  }
-  return summary.trim() || "無題";
-}
-
-async function updateUntitledSessions() {
-  console.log("updateUntitledSessions called");
-  let changed = false; 
-  for (const session of conversationSessions) {
-    if (session.title === "無題" && session.messages && session.messages.length > 0) {
-      console.log(`セッション ${session.id} のタイトルを要約処理で更新します。`);
-      const summary = await summarizeSessionAsync(session); 
-      if (typeof summary === "string" && summary.trim() && summary.trim() !== "無題") {
-        session.title = summary.trim();
-        session.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
-        changed = true;
-      }
-    }
-  }
-  if (changed) { 
-    updateSideMenu();
-  }
-}
-
-async function backupToFirebase() {
-  console.log("backupToFirebase called");
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.error("ユーザーがログインしていません。バックアップできません。");
-    return;
-  }
-  if (!currentSession || !currentSession.id) { 
-    console.warn("バックアップするカレントセッションが存在しないか、IDがありません。");
-    return;
-  }
-
-  try {
-    const sessionDataToSave = { 
-        ...currentSession,
-        userId: currentUser.uid 
-    };
-
-    // updatedAt を Firestore Timestamp に変換
-    console.log("[backupToFirebase] Converting updatedAt. Original value:", currentSession.updatedAt, "Type:", typeof currentSession.updatedAt);
-    if (currentSession.updatedAt instanceof Date && !isNaN(currentSession.updatedAt.getTime())) {
-        sessionDataToSave.updatedAt = firebase.firestore.Timestamp.fromDate(currentSession.updatedAt);
-    } else if (currentSession.updatedAt) { 
-        try {
-            const dateObj = new Date(currentSession.updatedAt);
-            if (!isNaN(dateObj.getTime())) {
-                sessionDataToSave.updatedAt = firebase.firestore.Timestamp.fromDate(dateObj);
-            } else {
-                console.warn("Invalid date value for updatedAt (conversion failed):", currentSession.updatedAt, "Using current time instead.");
-                sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
-            }
-        } catch (e) {
-            console.warn("Error converting updatedAt to Date:", currentSession.updatedAt, e, "Using current time instead.");
-            sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
-        }
-    } else {
-        console.warn("updatedAt is missing or invalid, using current time instead.");
-        sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
-    }
-
-    // createdAt を Firestore Timestamp に変換
-    console.log("[backupToFirebase] Converting createdAt. Original value:", currentSession.createdAt, "Type:", typeof currentSession.createdAt);
-    if (currentSession.createdAt instanceof Date && !isNaN(currentSession.createdAt.getTime())) {
-        sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(currentSession.createdAt);
-    } else if (currentSession.createdAt) {
-        try {
-            const dateObj = new Date(currentSession.createdAt);
-            if (!isNaN(dateObj.getTime())) {
-                sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(dateObj);
-            } else {
-                console.warn("Invalid date value for createdAt (conversion failed):", currentSession.createdAt, "Using current time instead.");
-                sessionDataToSave.createdAt = firebase.firestore.Timestamp.now();
-            }
-        } catch (e) {
-            console.warn("Error converting createdAt to Date:", currentSession.createdAt, e, "Using current time instead.");
-            sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); 
-        }
-    } else {
-        console.warn("createdAt is missing or invalid, using current time instead.");
-        sessionDataToSave.createdAt = firebase.firestore.Timestamp.now();
-    }
-
-    // messages 配列内の timestamp を Firestore Timestamp に変換し、sources を削除
-    if (sessionDataToSave.messages && Array.isArray(sessionDataToSave.messages)) {
-      sessionDataToSave.messages = sessionDataToSave.messages.map(msg => {
-        const newMsg = { ...msg };
-        console.log("[backupToFirebase] Converting message timestamp. Original value:", msg.timestamp, "Type:", typeof msg.timestamp);
-        if (msg.timestamp instanceof Date && !isNaN(msg.timestamp.getTime())) {
-          newMsg.timestamp = firebase.firestore.Timestamp.fromDate(msg.timestamp);
-        } else if (msg.timestamp) { 
-            try {
-                // getTimestampValue は Date.parse と同等の振る舞いをする可能性があるため、
-                // new Date() で直接 Date オブジェクトを試みる方が安全か、
-                // もしくは getTimestampValue の結果をさらに new Date() に通す。
-                // ここでは直接 new Date() を試みる。
-                const dateObj = new Date(getTimestampValue(msg.timestamp)); // getTimestampValueはミリ秒を返す想定
-                if (!isNaN(dateObj.getTime())) {
-                    newMsg.timestamp = firebase.firestore.Timestamp.fromDate(dateObj);
-                } else {
-                    console.warn("Invalid date value for message timestamp (conversion failed):", msg.timestamp, "Using current time instead.");
-                    newMsg.timestamp = firebase.firestore.Timestamp.now();
-                }
-            } catch(e) {
-                console.warn("Error converting message timestamp to Date:", msg.timestamp, e, "Using current time instead.");
-                newMsg.timestamp = firebase.firestore.Timestamp.now();
-            }
-        } else {
-           console.warn("Message timestamp is missing or invalid, using current time instead.");
-           newMsg.timestamp = firebase.firestore.Timestamp.now();
-        }
-        delete newMsg.sources;
-        return newMsg;
-      });
-    }
-
-    const sessionDocRef = db.collection("chatSessions").doc(sessionDataToSave.id);
-    await sessionDocRef.set(sessionDataToSave); 
-    console.log(`Session ${sessionDataToSave.id} backed up successfully (/chatSessions).`);
-
-    // バックアップ成功後、ローカルの currentSession のタイムスタンプも Date オブジェクトに更新
-    if (currentSession && currentSession.id === sessionDataToSave.id) {
-        if (sessionDataToSave.updatedAt && sessionDataToSave.updatedAt.toDate) {
-            currentSession.updatedAt = sessionDataToSave.updatedAt.toDate(); 
-        }
-        if (sessionDataToSave.createdAt && sessionDataToSave.createdAt.toDate) {
-            currentSession.createdAt = sessionDataToSave.createdAt.toDate();
-        }
-        if (sessionDataToSave.messages && Array.isArray(sessionDataToSave.messages)) {
-            currentSession.messages = sessionDataToSave.messages.map(msg => {
-                 const localMsg = { ...msg }; 
-                 if (localMsg.timestamp && localMsg.timestamp.toDate) {
-                     localMsg.timestamp = localMsg.timestamp.toDate();
-                 }
-                 return localMsg;
-             });
-        }
-        console.log("Local currentSession's timestamps and messages updated after successful backup.");
-    }
-
-  } catch (error) {
-    console.error(`バックアップエラー (Session ID: ${currentSession?.id}):`, error);
-    if (error.code) console.error(`Firestore Error Code: ${error.code}`);
-    if (error.message) console.error(`Firestore Error Message: ${error.message}`);
-  }
-}
-
-function deleteLocalChats() {
-  conversationSessions = [];
-  currentSession = null;
-  document.getElementById('chatMessages').innerHTML = "";
-  updateSideMenu();
-  console.log("ローカルのチャット履歴を削除しました。");
+  return "TRANSLATION"; // 固定値を返すか、呼び出し元を修正
 }
 
 async function restoreFromFirebase() {
@@ -1485,57 +836,18 @@ async function restoreFromFirebase() {
   }
   console.log("restoreFromFirebase called. Current User UID:", currentUser.uid);
   
-  showThinkingIndicator(true); // ★ ロード中にインジケーター表示 ★
-  document.getElementById('chatMessages').innerHTML = ""; // チャット表示をクリア
-  currentSession = null; // カレントセッションをクリア
-  lastHeaderDate = null; // 日付ヘッダーもリセット
-
-  // conversationSessions は updateSideMenuFromFirebase でクリア＆設定されるのでここでは何もしない
+  showThinkingIndicator(true); 
+  document.getElementById('chatMessages').innerHTML = ""; 
+  lastHeaderDate = null; 
   
   try {
-    // ★ updateSideMenuFromFirebase を呼び出して初回ロードを行う ★
-    await updateSideMenuFromFirebase(false); 
-    console.log("リストア完了 (Firestoreからの初回読み込み完了)");
-
-    // 必要であれば、最も新しいセッションを currentSession に設定するなどのロジック
-    if (conversationSessions.length > 0) {
-        // updatedAt でソートされている前提 (updateSideMenuFromFirebase でソートされる)
-        // もし自動で最新を開かない仕様なら、currentSession は null のままか、特定の条件で設定
-        // currentSession = conversationSessions[0]; // 例: 最新を自動で開く場合
-        // loadSessionById(conversationSessions[0].id);
-        console.log("セッションリストア後、currentSession は自動的には設定されません。必要に応じて手動でロードしてください。");
-    } else {
-        console.log("リストアするセッションがありませんでした。");
-        // 必要ならここで createNewSession を呼ぶ
-        // await createNewSession();
-        // await updateSideMenuFromFirebase(false); 
-    }
+    updateSideMenu(); // サイドメニューを「履歴なし」に更新
+    await createNewSession(); // ログイン後にUIを初期状態にする
 
   } catch (error) {
     console.error("リストアエラー:", error);
-    if (error.code) { console.error(`Firestore Error Code: ${error.code}`); }
-    if (error.message) { console.error(`Firestore Error Message: ${error.message}`); }
   } finally {
-    showThinkingIndicator(false); // ★ インジケーター非表示 ★
-    // updateSideMenu(); // updateSideMenuFromFirebase の finally で呼ばれるので不要
-  }
-}
-
-async function summarizeAllSessions() {
-  try {
-    console.log("summarizeAllSessions called");
-    for (const session of conversationSessions) {
-      if (session.sessionState === "finished") {
-        const newTitle = await summarizeSessionAsync(session);
-        session.title = newTitle;
-        session.updatedAt = new Date().toISOString();
-      }
-    }
-    await backupToFirebase();
-    updateSideMenu();
-    console.log("全セッションの要約が完了しました。");
-  } catch (error) {
-    console.error("要約中にエラー:", error);
+    showThinkingIndicator(false); 
   }
 }
 
@@ -1576,15 +888,20 @@ function setSpeechBubbleText(text) {
   adjustSpeechBubbleFontSize();
 }
 
-// ★ Thinking Indicator 関数を先に定義 ★
+// ★ Thinking Indicator 関数を修正 (ヘッダーの吹き出しを利用) ★
 function showThinkingIndicator(show) {
-    const indicator = document.getElementById('thinkingIndicator');
-    if (indicator) {
-        indicator.style.display = show ? 'flex' : 'none'; // display: flex で表示
-        if (show) {
-            // インジケーター表示時に最下部にスクロール
-            scrollToBottom(); 
-        }
+    const bubble = document.getElementById('elephantBubble');
+    if (!bubble) return;
+
+    if (show) {
+        bubble.textContent = "考え中だゾウ...";
+        bubble.classList.add('visible');
+        adjustSpeechBubbleFontSize(); // 表示時にフォント調整
+        // 応答待機中は画像クリックで消えないように、一時的にクリックイベントを無効化する手もあるが、一旦シンプルに表示のみ
+    } else {
+        bubble.classList.remove('visible'); // API応答後は吹き出しを隠す
+        // 必要であれば、ここで吹き出しのテキストをデフォルトに戻す処理も追加可能
+        // bubble.textContent = ""; // もしくは都市情報など
     }
 }
 
@@ -1605,43 +922,7 @@ function logout() {
 }
 
 // ===== セッション削除関数 =====
-async function deleteSessionById(id) {
-    console.log("[deleteSessionById] Function called for ID:", id);
-    const currentUser = firebase.auth().currentUser;
-    if (!currentUser) {
-        console.error("[deleteSessionById] User not logged in. Cannot delete.");
-        return;
-    }
-
-    // ローカルから削除
-    const sessionIndex = conversationSessions.findIndex(s => s.id === id);
-    if (sessionIndex !== -1) {
-        conversationSessions.splice(sessionIndex, 1);
-        console.log("[deleteSessionById] Removed session from local array:", id);
-        // カレントセッションが削除された場合の処理
-        if (currentSession && currentSession.id === id) {
-            console.log("[deleteSessionById] Current session was deleted. Clearing chat.");
-            currentSession = null;
-            document.getElementById('chatMessages').innerHTML = "";
-            lastHeaderDate = null; 
-        }
-    } else {
-        console.warn("[deleteSessionById] Session not found in local array:", id);
-    }
-
-    // Firebase から削除
-    try {
-        await db.collection("chatSessions").doc(id).delete();
-        console.log("[deleteSessionById] Deleted session from Firestore:", id);
-    } catch (error) {
-        console.error("[deleteSessionById] Error deleting session from Firestore:", error);
-        // 必要であればエラー通知やローカル削除のロールバック処理
-    }
-
-    // サイドメニューを更新して変更を反映
-    console.log("[deleteSessionById] Calling updateSideMenu to reflect changes.");
-    updateSideMenu(); 
-}
+// deleteSessionById 関数全体を削除
 
 // ===== DOMContentLoaded イベントリスナー (ファイル末尾に移動) =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -1701,23 +982,23 @@ document.addEventListener('DOMContentLoaded', () => {
             // ... (初期化処理)
             try {
                  showThinkingIndicator(true);
-                 await restoreFromFirebase();
-                 await updateUntitledSessions();
-                 if (!currentSession) {
-                     console.log("No current session after restore, creating new one.");
-                     await createNewSession();
-                 }
+                 await restoreFromFirebase(); // restoreFromFirebase内でUIリセットとサイドメニュー更新
+                 // await updateUntitledSessions(); // 不要
+                 // if (!currentSession) { // currentSessionの履歴管理は不要
+                 //     console.log("No current session after restore, creating new one.");
+                 //     await createNewSession(); // restoreFromFirebase内で実施済みの想定
+                 // }
                  showThinkingIndicator(false);
              } catch (error) {
                  console.error("Initialization error after login:", error);
                  showThinkingIndicator(false);
-                  if (!currentSession) {
+                  // if (!currentSession) { // currentSessionの履歴管理は不要
                       try {
-                          await createNewSession();
+                          await createNewSession(); // エラーフォールバックとしてUIリセット
                       } catch (fallbackError) {
                           console.error("Fallback createNewSession failed:", fallbackError);
                       }
-                  }
+                  // }
              }
 
         } else {
@@ -1744,13 +1025,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ... (FirebaseUI の開始処理など)
             if (ui) {
-                // ... (ui.start)
+                // FirebaseUIのインスタンスが存在すれば開始
+                console.log("Starting FirebaseUI...");
+                ui.start('#firebaseui-auth-container', uiConfig);
             } else {
-                // ... (warn and fallback)
+                // 既にあれば、 AuthUI インスタンスは作成しない
+                console.warn("FirebaseUI instance (ui) is null, cannot start. This might happen if initialization failed or was skipped.");
+                // フォールバックとして再度初期化を試みるか、エラーメッセージを表示
+                // FirebaseUI コンテナに手動でメッセージを表示することも検討
+                const fbAuthContainer = document.getElementById('firebaseui-auth-container');
+                if (fbAuthContainer && !fbAuthContainer.hasChildNodes()) { // コンテナが空の場合のみメッセージ追加
+                    fbAuthContainer.innerHTML = '<p style="color: red;">ログインウィジェットの表示に問題が発生しました。ページを再読み込みしてください。</p>'
+                }
             }
-            conversationSessions = [];
-            currentSession = null;
-            updateSideMenu();
+            // conversationSessions = []; // 履歴管理は不要なため削除
+            // currentSession = null;     // 履歴管理は不要なため削除
+            updateSideMenu(); // サイドメニューを更新（「履歴はありません」を表示）
         }
     });
 
@@ -1763,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newChat = document.getElementById('new-chat');
     const modelSelect = document.getElementById('model-select');
     const dropdownToggle = document.getElementById('dropdown-toggle');
-    const deleteToggle = document.getElementById('delete-thread-mode-btn');
+    // const deleteToggle = document.getElementById('delete-thread-mode-btn'); // 削除
     const logoutLink = document.getElementById('logout-link');
     const micBtn = document.getElementById('micBtn');
     // const weatherBtn = document.getElementById('weather-btn'); // ★ 天気ボタン取得をコメントアウト ★
@@ -1789,16 +1079,16 @@ document.addEventListener('DOMContentLoaded', () => {
             parentDropdown.classList.toggle('open');
         }
     });
-    if (deleteToggle) deleteToggle.addEventListener('click', (e) => {
-        e.preventDefault();
-        isDeleteMode = !isDeleteMode;
-        deleteToggle.innerHTML = isDeleteMode ? '<i class="bi bi-check-circle-fill"></i> 削除モード (完了)' : '<i class="bi bi-trash"></i> スレッド削除';
-        updateSideMenu();
-        const parentDropdown = deleteToggle.closest('.dropdown');
-        if (parentDropdown) {
-             parentDropdown.classList.remove('open');
-        }
-    });
+    // if (deleteToggle) deleteToggle.addEventListener('click', (e) => { // 削除
+    //     e.preventDefault();
+    //     isDeleteMode = !isDeleteMode;
+    //     deleteToggle.innerHTML = isDeleteMode ? '<i class="bi bi-check-circle-fill"></i> 削除モード (完了)' : '<i class="bi bi-trash"></i> スレッド削除';
+    //     updateSideMenu();
+    //     const parentDropdown = deleteToggle.closest('.dropdown');
+    //     if (parentDropdown) {
+    //          parentDropdown.classList.remove('open');
+    //     }
+    // });
     if (logoutLink) {
         console.log("Logout link found. Adding listener...");
         logoutLink.addEventListener('click', logout); // logout 関数を参照
@@ -2111,66 +1401,6 @@ function getCityInfo(city) {
     });
 }
 
-// 吹き出しのテキストを設定・調整する関数群 (既存)
-function setSpeechBubbleText(text) {
-    console.log("[setSpeechBubbleText] Function called with text:", text);
-    const bubble = document.getElementById('elephantBubble');
-    if (!bubble) {
-        console.error("[setSpeechBubbleText] Bubble element not found!");
-        return;
-    }
-    console.log("[setSpeechBubbleText] Bubble element FOUND.");
-    try {
-        bubble.textContent = text;
-        console.log("[setSpeechBubbleText] textContent set successfully.");
-        bubble.classList.add('visible');
-        console.log("[setSpeechBubbleText] 'visible' class added.");
-        adjustSpeechBubbleFontSize(); // フォントサイズ調整呼び出し
-        console.log("[setSpeechBubbleText] adjustSpeechBubbleFontSize called successfully.");
-    } catch (error) {
-        console.error("[setSpeechBubbleText] Error during setting text or class:", error);
-    }
-}
-
-function adjustSpeechBubbleFontSize() {
-    console.log("[adjustSpeechBubbleFontSize] Function called.");
-    const bubble = document.getElementById('elephantBubble');
-    if (!bubble) {
-        console.error("[adjustSpeechBubbleFontSize] Bubble element not found!");
-        return;
-    }
-    console.log("[adjustSpeechBubbleFontSize] Bubble element FOUND.");
-    try {
-        const maxWidth = bubble.offsetWidth;
-        console.log("[adjustSpeechBubbleFontSize] offsetWidth obtained:", maxWidth);
-        const textLength = bubble.textContent.length;
-        console.log("[adjustSpeechBubbleFontSize] textContent.length obtained:", textLength);
-
-        // 長さに応じてクラスをトグル (閾値は適宜調整)
-        if (textLength > 30) { // 例: 30文字を超えたら小さくする
-            console.log("[adjustSpeechBubbleFontSize] Text is long, adding 'long' class.");
-            bubble.classList.add('long');
-        } else {
-            console.log("[adjustSpeechBubbleFontSize] Text is short, removing 'long' class.");
-            bubble.classList.remove('long');
-        }
-
-        // スクロール幅でのチェックも残す
-        const scrollWidth = bubble.scrollWidth;
-        console.log("[adjustSpeechBubbleFontSize] scrollWidth obtained:", scrollWidth);
-        if (scrollWidth > maxWidth) {
-            console.log("[adjustSpeechBubbleFontSize] scrollWidth > maxWidth, adding 'long' class.");
-            bubble.classList.add('long');
-        }
-        console.log("[adjustSpeechBubbleFontSize] Font size adjustment finished.");
-    } catch (error) {
-        console.error("[adjustSpeechBubbleFontSize] Error during font size adjustment:", error);
-    }
-}
-
-// ★ toggleRecording の実装 (適切な位置に定義) ★
-// ... (変更なし)
-
 // ★★★ データ正規化用のヘルパー関数ここから ★★★
 
 /**
@@ -2213,227 +1443,3 @@ function parseDateString(dateString) {
   console.warn("Unsupported or ambiguous date string format for parseDateString:", dateString);
   return null;
 }
-
-/**
- * ユーザーの全てのチャットセッションの updatedAt フィールドを正規化する
- * 文字列型の場合はFirestoreのTimestamp型に変換して更新する
- */
-async function normalizeAllSessionsUpdatedAt() {
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.error("正規化処理: ユーザーがログインしていません。");
-    alert("正規化処理: ユーザーがログインしていません。");
-    return;
-  }
-
-  console.log("正規化処理: 開始 (ユーザーID:", currentUser.uid, ")");
-  alert("チャット履歴の updatedAt フィールドの正規化処理を開始します。開発者コンソールで進捗を確認してください。処理には時間がかかる場合があります。");
-
-  try {
-    const chatSessionsRef = firebase.firestore().collection('chatSessions').where('userId', '==', currentUser.uid);
-    const snapshot = await chatSessionsRef.get();
-
-    if (snapshot.empty) {
-      console.log("正規化処理: 対象となるチャットセッションが見つかりませんでした。");
-      alert("正規化処理: 対象となるチャットセッションが見つかりませんでした。");
-      return;
-    }
-
-    let processedCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-    // let skippedYyyyMmDdCount = 0; // yyyy-mm-dd 形式のスキップは不要になったためコメントアウト
-    const batchSize = 100; 
-    let batch = firebase.firestore().batch();
-    let batchOperations = 0;
-
-    for (const doc of snapshot.docs) {
-      processedCount++;
-      const sessionData = doc.data();
-      const sessionId = doc.id;
-
-      if (sessionData.updatedAt && typeof sessionData.updatedAt === 'string') {
-        // yyyy-mm-dd 形式のチェックとスキップ処理を削除
-        // const yyyy_mm_dd_regex = /^\d{4}-\d{2}-\d{2}$/;
-        // if (yyyy_mm_dd_regex.test(sessionData.updatedAt)) {
-        //   console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt}') は 'yyyy-mm-dd' 形式のため、今回はスキップします。`);
-        //   skippedYyyyMmDdCount++;
-        //   continue; 
-        // }
-
-        console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt}') は文字列です。変換を試みます。`);
-        const dateObject = parseDateString(sessionData.updatedAt); // yyyy-mm-dd もここで処理される
-
-        if (dateObject) {
-          try {
-            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(dateObject);
-            batch.update(doc.ref, { updatedAt: firestoreTimestamp });
-            batchOperations++;
-            updatedCount++;
-            console.log(`正規化処理: セッションID ${sessionId} をTimestamp (${firestoreTimestamp.toDate().toISOString()}) に更新予定。`);
-
-            if (batchOperations >= batchSize) {
-              console.log(`正規化処理: ${batchOperations} 件のバッチをコミットします...`);
-              await batch.commit();
-              console.log("正規化処理: バッチコミット完了。");
-              batch = firebase.firestore().batch(); 
-              batchOperations = 0;
-              await new Promise(resolve => setTimeout(resolve, 500)); 
-            }
-          } catch (e) {
-            console.error(`正規化処理: セッションID ${sessionId} のTimestamp変換またはバッチ追加でエラー:`, e, "元の値:", sessionData.updatedAt);
-            errorCount++;
-          }
-        } else {
-          console.warn(`正規化処理: セッションID ${sessionId} のupdatedAt ('${sessionData.updatedAt}') をDateオブジェクトに変換できませんでした。スキップします。`);
-          errorCount++;
-        }
-      } else if (sessionData.updatedAt && sessionData.updatedAt.toDate && typeof sessionData.updatedAt.toDate === 'function') {
-        // 既にTimestamp型
-      } else if (sessionData.updatedAt instanceof Date) {
-         console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt.toISOString()}') はJavaScriptのDateオブジェクトです。Timestampに変換します。`);
-         try {
-            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(sessionData.updatedAt);
-            batch.update(doc.ref, { updatedAt: firestoreTimestamp });
-            batchOperations++;
-            updatedCount++;
-            if (batchOperations >= batchSize) {
-              console.log(`正規化処理: ${batchOperations} 件のバッチをコミットします...`);
-              await batch.commit();
-              console.log("正規化処理: バッチコミット完了。");
-              batch = firebase.firestore().batch();
-              batchOperations = 0;
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
-         } catch (e) {
-            console.error(`正規化処理: セッションID ${sessionId} のDateからTimestamp変換またはバッチ追加でエラー:`, e);
-            errorCount++;
-         }
-      } else if (!sessionData.updatedAt) {
-        console.warn(`正規化処理: セッションID ${sessionId} に updatedAt フィールドが存在しません。スキップします。`);
-        errorCount++;
-      } else {
-        console.warn(`正規化処理: セッションID ${sessionId} の updatedAt は予期しない型です:`, sessionData.updatedAt, "スキップします。");
-        errorCount++;
-      }
-    }
-
-    if (batchOperations > 0) {
-      console.log(`正規化処理: 残り ${batchOperations} 件のバッチをコミットします...`);
-      await batch.commit();
-      console.log("正規化処理: 最終バッチコミット完了。");
-    }
-
-    console.log("正規化処理: 完了。");
-    // console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, 'yyyy-mm-dd'形式スキップ数: ${skippedYyyyMmDdCount}, その他エラー/スキップ数: ${errorCount}`);
-    console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, エラー/スキップ数: ${errorCount}`);
-    alert(`正規化処理が完了しました。
-総処理: ${processedCount}件
-更新: ${updatedCount}件
-エラー/スキップ: ${errorCount}件
-詳細は開発者コンソールを確認してください。ページをリロードして動作を確認してください。`);
-// 'yyyy-mm-dd'形式スキップは削除したため、アラートからも削除
-
-  } catch (error) {
-    console.error("正規化処理中にエラーが発生しました:", error);
-    alert("正規化処理中にエラーが発生しました。詳細は開発者コンソールを確認してください。");
-  }
-}
-// ★★★ データ正規化用のヘルパー関数ここまで ★★★
-
-// ★★★ createdAt データ正規化用のヘルパー関数ここから ★★★
-
-/**
- * ユーザーの全てのチャットセッションの createdAt フィールドを正規化する
- * 文字列型やDateオブジェクトの場合はFirestoreのTimestamp型に変換して更新する
- */
-async function normalizeAllSessionsCreatedAt() {
-  const currentUser = firebase.auth().currentUser;
-  if (!currentUser) {
-    console.error("createdAt正規化: ユーザーがログインしていません。");
-    alert("createdAt正規化: ユーザーがログインしていません。");
-    return;
-  }
-
-  console.log("createdAt正規化: 開始 (ユーザーID:", currentUser.uid, ")");
-  alert("チャット履歴の createdAt フィールドの正規化処理を開始します。開発者コンソールで進捗を確認してください。処理には時間がかかる場合があります。");
-
-  try {
-    const chatSessionsRef = firebase.firestore().collection('chatSessions').where('userId', '==', currentUser.uid);
-    const snapshot = await chatSessionsRef.get();
-
-    if (snapshot.empty) {
-      console.log("createdAt正規化: 対象となるチャットセッションが見つかりませんでした。");
-      alert("createdAt正規化: 対象となるチャットセッションが見つかりませんでした。");
-      return;
-    }
-
-    let processedCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-    const batchSize = 100;
-    let batch = firebase.firestore().batch();
-    let batchOperations = 0;
-
-    for (const doc of snapshot.docs) {
-      processedCount++;
-      const sessionData = doc.data();
-      const sessionId = doc.id;
-
-      if (sessionData.createdAt && (typeof sessionData.createdAt === 'string' || sessionData.createdAt instanceof Date || (typeof sessionData.createdAt === 'object' && sessionData.createdAt.seconds === undefined && sessionData.createdAt.nanoseconds === undefined && !(sessionData.createdAt.toDate)) ) ) {
-        // 文字列、Dateオブジェクト、またはTimestamp型ではないプレーンなオブジェクト（toDateなし、seconds/nanosecondsなし）の場合
-        console.log(`createdAt正規化: セッションID ${sessionId} の createdAt ('${JSON.stringify(sessionData.createdAt)}') は変換対象です。変換を試みます。`);
-        const dateObject = sessionData.createdAt instanceof Date ? sessionData.createdAt : parseDateString(String(sessionData.createdAt)); // parseDateStringは文字列を期待
-
-        if (dateObject && !isNaN(dateObject.getTime())) {
-          try {
-            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(dateObject);
-            batch.update(doc.ref, { createdAt: firestoreTimestamp });
-            batchOperations++;
-            updatedCount++;
-            console.log(`createdAt正規化: セッションID ${sessionId} をTimestamp (${firestoreTimestamp.toDate().toISOString()}) に更新予定。`);
-
-            if (batchOperations >= batchSize) {
-              console.log(`createdAt正規化: ${batchOperations} 件のバッチをコミットします...`);
-              await batch.commit();
-              console.log("createdAt正規化: バッチコミット完了。");
-              batch = firebase.firestore().batch();
-              batchOperations = 0;
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
-          } catch (e) {
-            console.error(`createdAt正規化: セッションID ${sessionId} のTimestamp変換またはバッチ追加でエラー:`, e, "元の値:", sessionData.createdAt);
-            errorCount++;
-          }
-        } else {
-          console.warn(`createdAt正規化: セッションID ${sessionId} のcreatedAt ('${JSON.stringify(sessionData.createdAt)}') をDateオブジェクトに変換できませんでした。スキップします。`);
-          errorCount++;
-        }
-      } else if (sessionData.createdAt && typeof sessionData.createdAt.toDate === 'function') {
-        // 既にTimestamp型の場合は何もしない
-        // console.log(`createdAt正規化: セッションID ${sessionId} の createdAt は既にTimestamp型です。スキップします。`);
-      } else if (!sessionData.createdAt) {
-        console.warn(`createdAt正規化: セッションID ${sessionId} に createdAt フィールドが存在しません。スキップします。`);
-        errorCount++;
-      } else {
-        console.warn(`createdAt正規化: セッションID ${sessionId} の createdAt は予期しない型、または既にTimestampの可能性があります:`, sessionData.createdAt, "スキップします。");
-        // errorCount++; // 既にTimestampの可能性もあるため、ここではカウントしないか、より厳密な型チェックを parseDateString に任せる
-      }
-    }
-
-    if (batchOperations > 0) {
-      console.log(`createdAt正規化: 残り ${batchOperations} 件のバッチをコミットします...`);
-      await batch.commit();
-      console.log("createdAt正規化: 最終バッチコミット完了。");
-    }
-
-    console.log("createdAt正規化: 完了。");
-    console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, エラー/スキップ数: ${errorCount}`);
-    alert(`createdAtの正規化処理が完了しました。\n総処理: ${processedCount}件\n更新: ${updatedCount}件\nエラー/スキップ: ${errorCount}件\n詳細は開発者コンソールを確認してください。`);
-
-  } catch (error) {
-    console.error("createdAt正規化処理中にエラーが発生しました:", error);
-    alert("createdAt正規化処理中にエラーが発生しました。詳細は開発者コンソールを確認してください。");
-  }
-}
-// ★★★ createdAt データ正規化用のヘルパー関数ここまで ★★★

@@ -1,20 +1,20 @@
 /* ===== CSS変数の定義 ===== */
 :root {
-  /* New Palette based on #f0d28c */
-  --header-bg-color: #f0d28c; /* Golden Yellow/Sand */
-  --header-text-color: #5c4033; /* Dark Brown */
-  --side-menu-bg-color: var(--header-bg-color); /* Matches header #f0d28c */
-  --side-menu-text-color: var(--header-text-color); /* Dark Brown #5c4033 */
-  --chat-bg-color: #fdfbf5; /* ★ Change chat bg back to Yellowish Gray */
-  --self-bubble-bg-color: #f8e6b9; /* Light Yellow/Sand */
-  --other-bubble-bg-color: #FFFFFF;
-  --main-text-color: #333333; /* Dark Gray for better neutrality */
-  --link-color: #8b4513; /* Saddle Brown */
-  --link-hover-color: #a0522d; /* Sienna */
-  --button-bg-color: #5c4033; /* Dark Brown */
-  --button-text-color: #FFFFFF;
-  --border-color: #c8ab83; /* Adjusted border color */
-  --date-header-bg-color: rgba(92, 64, 51, 0.7); /* Dark Brown with alpha */
+  /* New Palette based on Taiwan Flag Colors - All Red Tone */
+  --header-bg-color: #FE0000; /* Taiwan Flag Red */
+  --header-text-color: #FFFFFF; /* White for contrast */
+  --side-menu-bg-color: var(--header-bg-color); /* Matches header */
+  --side-menu-text-color: var(--header-text-color); /* Matches header text */
+  --chat-bg-color: #FFE4E1; /* MistyRose - Light Reddish for chat background */
+  --self-bubble-bg-color: #FFB6C1; /* LightPink - Darker reddish for self bubble */
+  --other-bubble-bg-color: #FFFFFF; /* White */
+  --main-text-color: #333333; /* Dark Gray for neutrality (on light reddish bg) */
+  --link-color: #FF1493; /* DeepPink for links */
+  --link-hover-color: #FF69B4; /* HotPink for link hover */
+  --button-bg-color: #FE0000; /* Taiwan Flag Red for buttons */
+  --button-text-color: #FFFFFF; /* White for button text */
+  --border-color: #FE0000; /* Taiwan Flag Red for borders */
+  --date-header-bg-color: rgba(200, 0, 0, 0.7); /* Transparent Red */
 
   /* Original Variables (commented out or replaced) */
   /* --main-text-color: #324454; */
@@ -23,9 +23,9 @@
   /* --active-link-bg-color: #4682B4; */
   /* --active-link-text-color: #fff; */
   /* --light-blue-gray: #d8dbe0; */
-  /* --very-light-blue-gray: #f0f4f8; */ /* Kept as --chat-bg-color */
+  /* --very-light-blue-gray: #f0f4f8; */ 
   /* --heading-bg-color: #e6e9ed; */
-  /* --border-color: #94a9b8; */ /* Replaced */
+  /* --border-color: #94a9b8; */ 
   --font-family-montserrat: "Montserrat", sans-serif;
   --font-family-noto-sans-jp: "Noto Sans JP", sans-serif;
 }
@@ -34,7 +34,7 @@
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--chat-bg-color); /* ★ Use updated variable */
+  background-color: var(--chat-bg-color); 
   font-family: var(--font-family-noto-sans-jp);
 }
 
@@ -46,7 +46,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 0 10px;
-  position: relative; /* Set as positioning context */
+  position: relative; 
 }
 
 #main-header .logo {
@@ -61,7 +61,7 @@ body {
 
 #main-header .title {
   font-family: 'Montserrat', sans-serif;
-  color: var(--header-text-color);
+  color: var(--header-text-color); /* Use new text color */
   margin-left: 10px;
   font-size: 1.3rem;
 }
@@ -72,14 +72,14 @@ body {
 }
 
 #main-header select {
-  background-color: transparent; /* Match header */
-  color: var(--header-text-color);
+  background-color: transparent; 
+  color: var(--header-text-color); /* Use new text color */
   border: none;
   outline: none;
   font-family: "Noto Sans JP", sans-serif;
   font-size: 0.9rem;
-  padding: 2px 5px; /* 見た目の調整 */
-  border-radius: 4px; /* 角丸 */
+  padding: 2px 5px; 
+  border-radius: 4px; 
   cursor: pointer;
 }
 
@@ -89,41 +89,40 @@ body {
 #main-header .header-controls #weather-btn {
   cursor: pointer;
   font-size: 1.3rem;
-  color: var(--header-text-color);
-  vertical-align: middle; /* 縦位置合わせ */
+  color: var(--header-text-color); /* Use new text color */
+  vertical-align: middle; 
 }
 
 /* 天気ボタン固有のスタイル調整 */
 #main-header .header-controls #weather-btn {
-  background: none; /* 背景なし */
-  border: none; /* 境界線なし */
-  padding: 0; /* パディングなし */
-  margin: 0; /* マージンなし */
-  line-height: 1; /* アイコンの縦位置調整 */
+  background: none; 
+  border: none; 
+  padding: 0; 
+  margin: 0; 
+  line-height: 1; 
 }
 
 #main-header .header-controls #weather-btn:hover,
 #main-header .header-controls .new-chat:hover,
 #main-header .header-controls .hamburger:hover {
-  opacity: 0.8; /* ホバー効果 */
+  opacity: 0.8; 
 }
 
 .dropdown-toggle {
   cursor: pointer;
   font-size: 1.3rem;
-  color: var(--header-text-color);
+  color: var(--header-text-color); /* Use new text color */
 }
 
 /* ===== サイドメニュー（メニュー） ===== */
 #side-menu {
   position: fixed;
   top: 0;
-  right: -66.66%;  /* 画面幅の2/3 */
+  right: -66.66%;  
   width: 66.66%;
   height: 100%;
   background-color: var(--side-menu-bg-color);
-  color: var(--side-menu-text-color); /* Ensure base color is brown */
-  /* box-shadow: -2px 0 5px rgba(0,0,0,0.3); */ /* この行を削除またはコメントアウト */
+  color: var(--side-menu-text-color); 
   transition: right 0.3s ease;
   z-index: 1000;
   display: flex;
@@ -140,21 +139,21 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 10px;
-  background-color: var(--header-bg-color); /* ★ Ensure background matches header */
-  border-bottom: 1px solid rgba(92, 64, 51, 0.3); /* Darker border */
+  background-color: var(--header-bg-color); 
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3); /* Adjusted border for red theme (light border) */
 }
 
 #side-menu-header span {
   font-family: var(--font-family-montserrat);
   font-size: 1.1rem;
-  color: var(--side-menu-text-color); /* Explicitly set brown */
+  color: var(--side-menu-text-color); 
 }
 
 #side-menu-header button {
   background: none;
   border: none;
   font-size: 1.5rem;
-  color: var(--side-menu-text-color); /* Explicitly set brown */
+  color: var(--side-menu-text-color); 
   cursor: pointer;
 }
 
@@ -191,8 +190,8 @@ body {
   right: 0;
   height: 25px; /* 適度な高さ */
   padding: 10px;
-  border-top: 1px solid rgba(92, 64, 51, 0.3); /* Darker border */
-  background-color: var(--header-bg-color); /* ★ Ensure background matches header */
+  border-top: 1px solid rgba(255, 255, 255, 0.3); /* Adjusted border for red theme (light border) */
+  background-color: var(--header-bg-color); 
   z-index: 1001; /* リストより上に表示 */
   display: flex; /* 追加 */
   justify-content: space-between; /* 追加 */
@@ -227,16 +226,16 @@ body {
   bottom: 100%;
   right: 0;
   text-align: left;
-  background-color: var(--header-bg-color); /* ★ Ensure background matches header */
+  background-color: var(--header-bg-color); 
   min-width: 180px;
   box-shadow: 0px -2px 5px rgba(0,0,0,0.3);
   z-index: 1002;
-  border-radius: 4px; /* Add rounding */
-  border: 1px solid rgba(92, 64, 51, 0.3); /* Add subtle border */
+  border-radius: 4px; 
+  border: 1px solid rgba(255, 255, 255, 0.3); /* Adjusted border for red theme (light border) */
 }
 
 #dropdown-content a {
-  color: var(--side-menu-text-color); /* Ensure dropdown link color is brown */
+  color: var(--side-menu-text-color); 
   padding: 8px 10px;
   text-decoration: none;
   display: block;
@@ -244,7 +243,7 @@ body {
 }
 
 #dropdown-content a:hover {
-  background-color: rgba(92, 64, 51, 0.1); /* ★ Darker hover */
+  background-color: rgba(255, 255, 255, 0.1); /* Lighter hover for red theme */
 }
 
 #menu-footer .dropdown.open #dropdown-content {
@@ -259,7 +258,7 @@ body {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background-color: var(--chat-bg-color); /* ★ Use updated variable */
+  background-color: var(--chat-bg-color); 
 }
 
 /* ===== メッセージ一覧 ===== */
@@ -267,7 +266,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
-  background-color: var(--chat-bg-color); /* ★ Use updated variable */
+  background-color: var(--chat-bg-color); 
 }
 
 /* ===== 入力エリア ===== */
@@ -277,40 +276,47 @@ body {
   border-top: 1px solid var(--border-color);
   background-color: #fff;
   padding: 8px;
-  align-items: center; /* Align items vertically */
+  align-items: center; 
 }
 .chat-input textarea {
   flex: 1;
   resize: none;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color); /* Use new border color */
+  border-radius: 4px; /* 角丸を元に戻す */
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.3s ease; 
   padding: 5px;
-  font-size: 0.9rem;
   font-family: var(--font-family-noto-sans-jp);
   color: var(--main-text-color);
-  min-height: 40px; /* Ensure a minimum height */
-  align-self: stretch; /* Stretch to fill vertical space */
+  min-height: 40px; 
+  align-self: stretch; 
 }
+
+/* ★ 入力欄フォーカス時のスタイルを追加 ★ */
+.chat-input textarea:focus {
+  border-color: #FE0000; /* 赤色 */
+  border-width: 2px; /* 太字 */
+  box-shadow: 0 0 5px rgba(254, 0, 0, 0.5); /* オプション：少し光彩効果 */
+}
+
 .chat-input button {
   margin-left: 8px;
-  width: 55px; /* 元の固定幅に戻す */
-  height: 55px; /* 元の固定高さに戻す */
-  /* padding: 10px; */ /* パディング調整を削除 */
+  width: 55px; 
+  height: 55px; 
   border-radius: 4px;
   border: none;
   background-color: var(--button-bg-color);
   color: var(--button-text-color);
-  display: flex; /* 元の flex に戻す */
+  display: flex; 
   justify-content: center;
   align-items: center;
   cursor: pointer;
   font-family: var(--font-family-montserrat);
-  /* line-height: 1; */ /* line-height 調整を削除 */
 }
 
 .chat-input button i {
-  font-size: 1.2rem; /* 元のアイコンサイズに戻す */
-  /* display: block; */ /* display: block を削除 */
+  font-size: 1.2rem; 
 }
 
 /* ===== メッセージ行 ===== */
@@ -342,17 +348,22 @@ body {
   padding: 12px;
   position: relative;
   border-radius: 10px;
-  background-color: var(--other-bubble-bg-color); /* Default for other */
+  background-color: var(--other-bubble-bg-color); 
   color: var(--main-text-color);
-  border: 1px solid #e8e8e8; /* ★ Add subtle border */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03); /* ★ Add subtle shadow */
+  border: 1px solid #e0e0e0; /* Lighter border for other bubble */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03); 
 }
 .message-row.self .bubble {
   background-color: var(--self-bubble-bg-color);
-  color: var(--main-text-color); /* Ensure contrast */
+  color: var(--main-text-color); /* Dark gray on light pink bubble */ 
+  border: 1px solid #FF8A8A; /* Matching Pink border for self bubble */
 }
 .message-row.other .bubble {
   margin-left: 10px;
+  background-color: var(--other-bubble-bg-color); 
+  color: var(--main-text-color); /* Dark gray on white bubble */
+  border: 1px solid #FF8A8A; /* Slightly darker Pink border for other bubble on reddish bg */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03); 
 }
 .message-row.self .bubble {
   margin-right: 10px;
@@ -368,10 +379,8 @@ body {
   width: 20px;
   height: 30px;
   border-radius: 0 0 0 15px;
-  /* ★ 1. 背景色(Fill) -> 2. 境界線色(Border) の順で指定 */
-  /* 境界線シャドウの広がりを -6px に戻す */
-  box-shadow: -3px -15px 0 -7px var(--other-bubble-bg-color) inset, /* Fill (BG Color) - Smaller */
-              -2px -14px 0 -6px #e8e8e8 inset; /* Border (Gray) - Original */
+  box-shadow: -3px -15px 0 -7px var(--other-bubble-bg-color) inset, 
+              -2px -14px 0 -6px #FF8A8A inset; /* Match other bubble border (Slightly darker Pink) */
 }
 
 .message-row.self .bubble::before {
@@ -382,10 +391,8 @@ body {
   width: 20px;
   height: 30px;
   border-radius: 0 0 15px 0;
-  /* ★ 1. 背景色(Fill) -> 2. 境界線色(Border) の順で指定 */
-  /* 境界線シャドウの広がりを -6px に戻す */
-  box-shadow: 3px -15px 0 -7px var(--self-bubble-bg-color) inset, /* Fill (BG Color) - Smaller */
-              2px -14px 0 -6px #e8e8e8 inset; /* Border (Gray) - Original */
+  box-shadow: 3px -15px 0 -7px var(--self-bubble-bg-color) inset, 
+              2px -14px 0 -6px #FF8A8A inset; /* Match self bubble border (Slightly darker Pink) */
 }
 
 /* ===== 吹き出し内テキスト ===== */
@@ -393,46 +400,46 @@ body {
   font-size: 0.95rem;
   line-height: 1.4;
   white-space: pre-wrap;
-  margin-bottom: 4px; /* Base margin for the container */
+  margin-bottom: 4px; 
   overflow-wrap: break-word;
 }
 
 /* Default Paragraph Margin */
 .bubble-text p {
   margin-top: 0;
-  margin-bottom: 0.6em; /* Space between paragraphs */
+  margin-bottom: 0.6em; 
 }
 
 /* Title Paragraph Styling */
 .bubble-text p.chat-title {
-  margin-bottom: 0.3em; /* Reduced space after title */
+  margin-bottom: 0.3em; 
 }
 
 .bubble-text p.chat-title strong {
   font-weight: bold;
-  line-height: 1.2; /* Keep title line-height adjusted */
+  line-height: 1.2; 
+  color: var(--main-text-color); /* This should be dark gray now */
 }
 
 /* List Styling */
 .bubble-text ul {
-  margin-top: 0.3em; /* Space before list */
-  margin-bottom: 0.6em; /* Space after list */
-  padding-left: 1.5em; /* Indentation for list */
+  margin-top: 0.3em; 
+  margin-bottom: 0.6em; 
+  padding-left: 1.5em; 
 }
 
 .bubble-text li {
   list-style: none;
   position: relative;
-  /* padding-left: 1.2em; */ /* Use ul padding instead */
   margin-bottom: 0.3em;
 }
 
 .bubble-text li::before {
   content: '•';
   position: absolute;
-  left: -1.1em; /* Position marker relative to li */
+  left: -1.1em; 
   top: 0.1em;
-  color: var(--main-text-color);
+  color: var(--main-text-color); /* This should be dark gray now */
   font-size: 1em;
 }
 
@@ -441,7 +448,7 @@ body {
   position: absolute;
   bottom: 3px; /* 垂直位置調整 */
   font-size: 0.7rem;
-  color: #666; /* Slightly lighter gray for less emphasis */
+  color: #666; /* Slightly lighter gray for less emphasis (original) */
   white-space: nowrap; /* 時刻が折り返さないように */
 }
 
@@ -457,12 +464,12 @@ body {
 
 /* ===== 発言内容の区切り（日付表示） ===== */
 .date-header {
-  display: table;           /* インラインブロックではなく、内容に合わせたテーブル表示 */
-  margin: 10px auto;        /* 自動左右マージンで中央配置 */
+  display: table;           
+  margin: 10px auto;        
   text-align: center;
   font-size: 0.7rem;
   font-family: var(--font-family-noto-sans-jp);
-  color: #FFFFFF;
+  color: #FFFFFF; /* Keep white text for contrast on dark bg */
   background-color: var(--date-header-bg-color);
   padding: 4px 8px;
   border-radius: 12px;
@@ -495,23 +502,23 @@ body {
   right: 8px;
   background: none;
   border: none;
-  color: #666; /* Match timestamp color */
+  color: #666; 
   cursor: pointer;
-  padding: 2px; /* 少しパディングを追加 */
+  padding: 2px; 
   font-size: 0.9em;
-  opacity: 0; /* ★ 通常は非表示 */
+  opacity: 0; 
   transition: opacity 0.2s ease;
-  z-index: 1; /* テキストより手前に */
+  z-index: 1; 
 }
 .bubble:hover .copy-msg-btn {
-  opacity: 0.6; /* ★ 吹き出しホバーで表示 */
+  opacity: 0.6; 
 }
 .copy-msg-btn:hover {
   opacity: 1;
 }
 .copy-msg-btn i {
   pointer-events: none;
-  vertical-align: middle; /* アイコンの垂直位置調整 */
+  vertical-align: middle; 
 }
 
 /* 1行のみの場合にコピーボタンがテキストと重なるのを防ぐ */
@@ -521,7 +528,7 @@ body {
 }
 
 #conversation-history a {
-    color: var(--side-menu-text-color) !important; /* ★ Ensure brown color */
+    color: var(--side-menu-text-color) !important; 
     display: block;
     margin-bottom: 5px;
     padding: 5px;
@@ -530,49 +537,47 @@ body {
     transition: background-color 0.2s ease;
 }
 #conversation-history a:hover {
-    background-color: rgba(92, 64, 51, 0.1);
+    background-color: rgba(255, 255, 255, 0.1); /* Adjusted for red theme (light hover) */
 }
-#conversation-history a[style*="bold"] { /* Style for active session */
-    background-color: rgba(92, 64, 51, 0.2);
+#conversation-history a[style*="bold"] { 
+    background-color: rgba(255, 255, 255, 0.2); /* Adjusted for red theme (light active bg) */
 }
 
 /* ===== 象の吹き出しスタイル ===== */
 .speech-bubble {
   position: absolute;
-  left: 56px; /* Position it after the elephant image + 20px */
-  top: 7px; /* Small offset from the header top */
-  transform: none; /* Remove previous transform */
-  background-color: #fff; /* 背景は白のまま */
-  color: #324454;
+  left: 56px; 
+  top: 7px; 
+  transform: none; 
+  background-color: #fff; 
+  color: var(--main-text-color); /* Use main text color for bubble */
   border-radius: 10px;
   padding: 5px 10px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-  
   opacity: 0;
   visibility: hidden;
-  
-  z-index: 10;  /* 吹き出し本体全体の z-index */
+  z-index: 10;  
   white-space: nowrap;
   pointer-events: none;
-  max-width: calc(100% - 100px); /* ヘッダー内に収めるための最大幅を調整 */
-  overflow: visible; /* はみ出した部分を表示 */
-  text-overflow: ellipsis; /* はみ出した部分を省略記号で表示 */
+  max-width: calc(100% - 100px); 
+  overflow: visible; 
+  text-overflow: ellipsis; 
 }
 
 /* 通常時のフォントサイズ */
 .speech-bubble {
-  font-size: 0.9rem;  /* フォントサイズを少し大きく調整 */
+  font-size: 0.9rem;  
 }
 
 /* 文字数が多い場合用のクラス */
 .speech-bubble.long {
-  font-size: 0.75rem;  /* フォントサイズを少し大きく調整 */
+  font-size: 0.75rem;  
 }
 
 .speech-bubble.visible {
   opacity: 1;
   visibility: visible;
-  border: 1px solid rgba(240, 210, 140, 1); /* ヘッダーの背景色に合わせる */
+  border: 1px solid var(--header-bg-color); /* Border to match header bg (now red) */
 }
 
 /* LINE風の三角形 */
@@ -585,7 +590,7 @@ body {
   width: 20px;
   height: 30px;
   border-radius: 0 0 0 15px;
-  box-shadow: -3px -15px 0 -7px #fff inset; /* 背景は白のまま */
+  box-shadow: -3px -15px 0 -7px #fff inset; 
   z-index: 11;
 }
 
@@ -599,7 +604,7 @@ body {
   width: 20px;
   height: 30px;
   border-radius: 0 0 0 15px;
-  box-shadow: -3px -15px 0 -7px rgba(240, 210, 140, 0.9) inset; /* ヘッダーの背景色に近づける */
+  box-shadow: -3px -15px 0 -7px var(--header-bg-color) inset; /* Shadow to match header bg (now red) */
   z-index: 9;
 }
 
@@ -609,7 +614,6 @@ body {
   position: relative;
   border-radius: 4px;
   margin: 10px 0;
-  /* padding-top: 30px; */ /* FIX: Remove padding-top, button is inside <pre> now */
 }
 
 /* コードブロック本体 (Prismが<pre><code>を使う) */
@@ -618,24 +622,23 @@ body {
   margin: 0 !important;
   padding: 1em !important;
   overflow-x: auto;
-  border-radius: 4px !important; /* FIX: Apply border-radius to pre */
-  position: relative; /* FIX: Add relative positioning for the button */
+  border-radius: 4px !important; 
+  position: relative; 
 }
 
 .code-block-container pre[class*="language-"] {
   padding: 1em !important;
   margin: 0 !important;
-  /* border-radius: 0 0 4px 4px !important; */ /* FIX: Remove specific border-radius */
 }
 
 .code-block-container code[class*="language-"] {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
   font-size: 0.85rem;
   line-height: 1.5;
-  white-space: pre-wrap !important; /* 折り返しを強制 */
+  white-space: pre-wrap !important; 
   overflow-wrap: break-word;
-  background: none !important; /* 親の<pre>の背景を使う */
-  color: #abb2bf; /* Okaidiaテーマのデフォルトに近い色 */
+  background: none !important; 
+  color: #abb2bf; 
 }
 
 /* Prismのコメント色 (Okaidiaテーマの場合) */
@@ -649,8 +652,8 @@ body {
 /* コードブロック用コピーボタン */
 .copy-code-btn {
   position: absolute;
-  top: 0.5em; /* FIX: Adjust positioning relative to <pre> padding */
-  right: 0.5em; /* FIX: Adjust positioning relative to <pre> padding */
+  top: 0.5em; 
+  right: 0.5em; 
   background-color: #444c56;
   color: #c9d1d9;
   border: 1px solid #586069;
@@ -659,17 +662,12 @@ body {
   font-size: 0.8em;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  opacity: 0.6; /* Slightly visible by default inside code block */
+  opacity: 0.6; 
 }
-.code-block-container pre:hover .copy-code-btn { /* Show on pre hover */
+.code-block-container pre:hover .copy-code-btn { 
     opacity: 1;
 }
-/* Remove general hover rule for button itself if always visible on pre hover */
-/*
-.copy-code-btn:hover {
-  background-color: #586069;
-}
-*/
+
 .copy-code-btn i {
   pointer-events: none;
 }
@@ -677,111 +675,125 @@ body {
 
 /* ===== スレッド削除用ゴミ箱アイコン ===== */
 .delete-thread-icon {
-  display: none; /* 通常は非表示 */
+  display: none; 
   position: absolute;
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
   cursor: pointer;
   color: var(--side-menu-text-color);
-  font-size: 0.9rem; /* 少し小さめに */
+  font-size: 0.9rem; 
   opacity: 0.7;
   transition: opacity 0.2s ease;
 }
 
 #conversation-history a:hover .delete-thread-icon {
-  opacity: 1; /* ホバー時に少し濃く */
+  opacity: 1; 
 }
 
 .delete-mode .delete-thread-icon {
-  display: inline-block; /* 削除モード時に表示 */
+  display: inline-block; 
 }
 
 /* 音声入力ボタン */
 .chat-input #micBtn {
-  /* 元のコメントアウト状態に戻すか、必要なら個別スタイルを設定 */
-  /* margin-left: 8px; */
-  /* width: 55px; */
-  /* height: 55px; */
-  /* border-radius: 4px; */
-  /* border: none; */
-  background-color: #ccc; /* 通常時の色 (例: グレー) */
-  /* color: var(--button-bg-color); */
-  /* padding: 0; */
-  /* display: flex; */
-  /* justify-content: center; */
-  /* align-items: center; */
-  /* cursor: pointer; */
+  background-color: #ccc; 
   transition: background-color 0.2s ease;
 }
 
 .chat-input #micBtn.recording {
-  background-color: #ff6961; /* 録音中の色 (例: 赤系) */
-  color: #FFFFFF; /* 録音中のアイコンの色 (Override general rule) */
+  background-color: #ff6961; 
+  color: #FFFFFF; 
 }
-
-/* マイクアイコン固有のサイズ指定があれば復活させる (今回は不要) */
-/* General icon size is set above */
-/* .chat-input #micBtn i {
-  font-size: 1.0rem; 
-} */
 
 /* Style for the new chat button */
 .header-controls button.new-chat {
     background-color: transparent;
     border: none;
-    color: #fff;
-    padding: 5px; /* Adjust padding */
-    margin: 0 5px; /* Adjust margin */
+    color: var(--header-text-color); /* Use new text color (white on red) */
+    padding: 5px; 
+    margin: 0 5px; 
     cursor: pointer;
-    display: inline-flex; /* Align icon vertically */
+    display: inline-flex; 
     align-items: center;
     justify-content: center;
 }
 
 .header-controls button.new-chat i {
-    font-size: 1.5rem; /* ★ ハンバーガーと同じサイズに変更 ★ */
-    /* vertical-align: middle; is less effective with flex */
+    font-size: 1.5rem; 
 }
 
 /* Hamburger icon style */
 .header-controls i.hamburger {
-    font-size: 1.5rem; /* Adjust size */
-    color: #fff; /* Ensure color */
+    font-size: 1.5rem; 
+    color: var(--header-text-color); /* Use new text color (white on red) */
     cursor: pointer;
-    padding: 5px; /* Make clickable area larger */
+    padding: 5px; 
 }
 
 /* Side Menu Styles */
 #side-menu {
     position: fixed;
-    /* ... (他のサイドメニュースタイル) ... */
 }
 
 /* css/style.css に追加するスタイル例 */
 .load-more-btn {
   display: block;
-  width: calc(100% - 20px); /* 左右のパディングを考慮 */
+  width: calc(100% - 20px); 
   padding: 8px 10px;
-  margin: 10px auto 5px auto; /* 上下にマージン、左右は自動で中央揃え */
-  background-color: var(--header-bg-color); /* ★ ヘッダー背景色に合わせる */
-  color: var(--header-text-color); /* ★ ヘッダーテキスト色に合わせる */
-  border: 1px solid var(--header-text-color); /* ★ ヘッダーテキスト色に合わせる */
+  margin: 10px auto 5px auto; 
+  background-color: var(--header-bg-color);  /* Now red */
+  color: var(--header-text-color); /* Now white */
+  border: 1px solid var(--header-text-color);  /* Now white border on red bg */
   border-radius: 5px;
   cursor: pointer;
   text-align: center;
-  transition: background-color 0.3s, color 0.3s, border-color 0.3s; /* ホバー時のトランジション */
+  transition: background-color 0.3s, color 0.3s, border-color 0.3s; 
 }
 
 .load-more-btn:hover {
-  background-color: var(--header-text-color); /* ★ ホバー時はヘッダーテキスト色（茶色）を背景に */
-  color: var(--header-bg-color); /* ★ ホバー時はヘッダー背景色（黄色）を文字色に */
-  border-color: var(--header-text-color); /* ★ 枠線はそのままヘッダーテキスト色（茶色） */
+  background-color: var(--header-text-color); /* Now white bg */
+  color: var(--header-bg-color); /* Now red text */
+  border-color: var(--header-text-color); /* Now white border */
 }
 
 .no-more-history {
-  color: #a0aec0; /* Tailwindのgray.500に近い色 */
+  color: #a0aec0; 
   text-align: center;
   padding: 10px;
   font-size: 0.9em;
 }
+
+/* ===== 考え中インジケーター (ヘッダーの吹き出しを使用するため、ここは削除) ===== */
+/*
+.thinking-indicator {
+  display: flex; 
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background-color: var(--chat-bg-color);
+  border-top: 1px solid var(--border-color);
+  color: var(--main-text-color);
+  font-style: italic;
+}
+
+.thinking-indicator .thinking-elephant {
+  width: 30px;
+  height: 30px;
+  margin-right: 8px;
+  animation: soft-shake 1.5s ease-in-out infinite;
+}
+
+.thinking-indicator .thinking-text {
+  font-size: 0.9rem;
+}
+
+@keyframes soft-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+}
+*/
+
+/* ★★★ データ正規化用のヘルパー関数ここから ★★★ */ 
+/* (script.js の内容なので CSS には不要) */

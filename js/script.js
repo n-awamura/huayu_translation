@@ -358,19 +358,30 @@ async function endCurrentSession() {
 
   if (currentSession.messages && currentSession.messages.length > 0) {
     const newTitle = await summarizeSessionAsync(currentSession);
-    if (typeof newTitle === "string") {
+    if (typeof newTitle === "string" && newTitle.trim() !== "") { // 空文字列でないことを確認
       currentSession.title = newTitle;
     } else {
       currentSession.title = currentSession.title || "無題";
     }
   } else {
     console.log("メッセージが空のため、要約は実施しません。");
+    currentSession.title = "無題";
   }
 
   currentSession.sessionState = "finished";
-  currentSession.updatedAt = new Date().toISOString();
+  currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
 
-  await backupToFirebase();
+  const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+  if (sessionIndex > -1) {
+    conversationSessions[sessionIndex].title = currentSession.title;
+    conversationSessions[sessionIndex].updatedAt = currentSession.updatedAt; // Date オブジェクトをコピー
+    conversationSessions[sessionIndex].sessionState = currentSession.sessionState;
+    console.log(`Updated session ${currentSession.id} in local conversationSessions after endCurrentSession.`);
+  } else {
+    console.warn(`Session ${currentSession.id} not found in conversationSessions during endCurrentSession. This should not happen if createNewSession worked correctly.`);
+  }
+
+  await backupToFirebase(); // updatedAt は backupToFirebase 内で Timestamp に変換される
   updateSideMenu();
 }
 
@@ -382,24 +393,42 @@ async function onSendButton() {
 
   if (!currentSession) {
     console.log("現在のセッションが存在しないため、新規セッションを作成します。");
-    await createNewSession();
+    await createNewSession(); 
   }
-  else if (currentSession.sessionState !== "active") {
+  
+  if (currentSession.sessionState !== "active") {
     console.log("終了済みセッションを再利用するため、active に切り替えます。");
     currentSession.sessionState = "active";
-    currentSession.updatedAt = new Date().toISOString();
   }
+  currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
 
   addMessageRow(message, 'self');
   input.value = '';
   scrollToBottom();
 
+  // currentSession.messages は createNewSession や loadSessionById で初期化されるか、
+  // 既存のものが使われる。常に配列であることを保証する。
+  if (!currentSession.messages) currentSession.messages = [];
   currentSession.messages.push({
     sender: 'User',
     text: message,
     timestamp: new Date()
   });
-  currentSession.updatedAt = new Date().toISOString();
+
+  const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+  if (sessionIndex > -1) {
+    conversationSessions[sessionIndex].updatedAt = currentSession.updatedAt;
+    conversationSessions[sessionIndex].sessionState = currentSession.sessionState;
+    // conversationSessions[sessionIndex].messages も同期が必要な場合があるが、
+    // currentSession.messages と conversationSessions[sessionIndex].messages が
+    // 同じ配列を参照していれば不要。createNewSessionでコピーを作っているので注意が必要。
+    // 安全策として messages も同期するなら以下のようにする:
+    // conversationSessions[sessionIndex].messages = [...currentSession.messages]; 
+    // ただし、パフォーマンス影響と、参照を保ちたいケースとの兼ね合いを考慮。
+    // ここではupdatedAtとsessionStateのみ更新。
+  } else {
+      console.warn("[onSendButton] currentSession not found in conversationSessions. This might indicate an issue.");
+  }
 
   await callGemini(message);
 }
@@ -415,115 +444,179 @@ async function toggleSideMenu() {
 }
 
 async function updateSideMenuFromFirebase(loadMore = false) {
-  console.log(`updateSideMenuFromFirebase called, loadMore: ${loadMore}`);
   const currentUser = firebase.auth().currentUser;
   if (!currentUser) {
-    console.error("ユーザーがログインしていません。サイドメニューを更新できません。");
+    console.log("updateSideMenuFromFirebase: User not logged in.");
     return;
   }
-
-  showThinkingIndicator(true); // ★ ロード中にインジケーター表示 ★
+  console.log(`updateSideMenuFromFirebase called, loadMore: ${loadMore}`);
 
   try {
-    let query = db.collection("chatSessions")
-                  .where("userId", "==", currentUser.uid)
-                  .orderBy("updatedAt", "desc");
+    let query = firebase.firestore().collection('chatSessions')
+      .where('userId', '==', currentUser.uid)
+      .orderBy('updatedAt', 'desc')
+      .orderBy('createdAt', 'desc'); // ★ createdAt でのセカンダリソートを追加 ★
 
-    if (loadMore) {
-      if (allHistoryLoaded) {
-        console.log("全履歴読み込み済みのため、追加読み込みをスキップします。");
-        showThinkingIndicator(false);
-        return;
-      }
-      if (!lastVisibleDocFromFirestore) {
-        console.warn("追加読み込みの開始ドキュメントがありません。初回読み込みとして扱います。");
-        // Fallback to initial load if lastVisibleDoc is missing for some reason
-        // This case should ideally not happen if logic is correct.
-        loadMore = false; 
+    const countToLoad = loadMore ? LOAD_MORE_COUNT : INITIAL_LOAD_COUNT;
+
+    if (loadMore && lastVisibleDocFromFirestore) {
+      query = query.startAfter(lastVisibleDocFromFirestore);
+    } else if (!loadMore) {
+      lastVisibleDocFromFirestore = null; 
+      allHistoryLoaded = false; 
+      console.log("Initial load or refresh: lastVisibleDocFromFirestore reset.");
+    }
+
+    query = query.limit(countToLoad);
+
+    const snapshot = await query.get();
+
+    // ★ Firestoreから読み込む際は、一旦ローカルの conversationSessions をクリアするかどうかを loadMore フラグで制御する
+    // if (!loadMore) { // 初期読み込み、または「もっと見る」でない更新の場合
+    //    conversationSessions = []; 
+    //    console.log("Initial load or refresh: Cleared local conversationSessions.");
+    // }
+    // ↑ Firestoreからのデータ取得前にローカルをクリアすると、currentSessionの扱いなどが複雑になるため、
+    //   マージ処理で対応する方針を維持。ただし、初期ロード時はクリアした方が良い場合もある。
+    //   現状の動作で問題なければこのまま。もし初期ロード時に古いデータが残る問題があれば再検討。
+    //   ログから、初期読み込み時には conversationSessions = []; されているので問題なさそう。
+
+
+    const newSessions = [];
+    snapshot.forEach(doc => {
+      const sessionData = doc.data();
+      let updatedAtDate;
+      if (sessionData.updatedAt && typeof sessionData.updatedAt.toDate === 'function') {
+        updatedAtDate = sessionData.updatedAt.toDate();
+      } else if (sessionData.updatedAt instanceof Date) {
+        updatedAtDate = sessionData.updatedAt;
+      } else if (sessionData.updatedAt) {
+        updatedAtDate = new Date(sessionData.updatedAt);
+        if (isNaN(updatedAtDate.getTime())) {
+            console.warn(`Invalid date format for updatedAt: ${sessionData.updatedAt}, using epoch for session ID: ${doc.id}`);
+            updatedAtDate = new Date(0); 
+        }
       } else {
-        query = query.startAfter(lastVisibleDocFromFirestore).limit(LOAD_MORE_COUNT);
+        updatedAtDate = new Date(0); 
       }
-    }
-    
-    if (!loadMore) { // Initial load or fallback from problematic loadMore
-      allHistoryLoaded = false;
-      lastVisibleDocFromFirestore = null;
-      // conversationSessions は Firestore から取得後にクリア＆再構築する
-      query = query.limit(INITIAL_LOAD_COUNT);
-    }
 
-    const querySnapshot = await query.get();
+      // createdAt も同様に Date オブジェクトに変換
+      let createdAtDate;
+      if (sessionData.createdAt && typeof sessionData.createdAt.toDate === 'function') {
+        createdAtDate = sessionData.createdAt.toDate();
+      } else if (sessionData.createdAt instanceof Date) {
+        createdAtDate = sessionData.createdAt;
+      } else if (sessionData.createdAt) {
+        createdAtDate = new Date(sessionData.createdAt);
+        if (isNaN(createdAtDate.getTime())) {
+            console.warn(`Invalid date format for createdAt: ${sessionData.createdAt}, using epoch for session ID: ${doc.id}`);
+            createdAtDate = new Date(0);
+        }
+      } else {
+        createdAtDate = new Date(0); // createdAt がない場合はエポック
+      }
 
-    if (!loadMore) {
-        conversationSessions = []; // 初回ロード時はローカルセッションをクリア
-        console.log("Initial load: Cleared local conversationSessions.");
-    }
-
-    if (querySnapshot.empty) {
-      console.log("Firestoreから取得したセッションがありません。");
-      allHistoryLoaded = true;
-    } else {
-      console.log(`Firestoreから ${querySnapshot.docs.length} 件のセッションを取得しました。`);
-      querySnapshot.forEach(doc => {
-        let sessionData = doc.data();
-        // --- Timestamp 変換処理 ---
-        if (sessionData.createdAt && sessionData.createdAt.toDate) {
-            sessionData.createdAt = sessionData.createdAt.toDate();
-        }
-        if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
-            sessionData.updatedAt = sessionData.updatedAt.toDate();
-        }
-        if (sessionData.messages && Array.isArray(sessionData.messages)) {
-            sessionData.messages = sessionData.messages.map(msg => {
-                const localMsg = { ...msg };
-                if (localMsg.timestamp && localMsg.timestamp.toDate) {
-                    localMsg.timestamp = localMsg.timestamp.toDate();
-                }
-                return localMsg;
-            });
-        }
-        // --- 変換処理ここまで ---
-        // 重複を避けるために、既存のセッションがあれば更新、なければ追加
-        const existingIndex = conversationSessions.findIndex(s => s.id === sessionData.id);
-        if (existingIndex > -1) {
-            conversationSessions[existingIndex] = sessionData;
-        } else {
-            conversationSessions.push(sessionData);
-        }
+      newSessions.push({
+        id: doc.id,
+        ...sessionData,
+        updatedAt: updatedAtDate,
+        createdAt: createdAtDate, // ★ createdAt も Date オブジェクトとして保持 ★
+        messages: sessionData.messages || [] 
       });
+    });
 
-      lastVisibleDocFromFirestore = querySnapshot.docs[querySnapshot.docs.length - 1];
-      
-      if (querySnapshot.docs.length < (loadMore ? LOAD_MORE_COUNT : INITIAL_LOAD_COUNT)) {
-        console.log("取得件数がリミットより少ないため、全履歴読み込み完了とします。");
-        allHistoryLoaded = true;
-      }
+    console.log(`Firestoreから ${newSessions.length} 件のセッションを取得しました。`);
+    if (newSessions.length > 0) {
+      console.log("Fetched sessions (up to 3 with full timestamps):", 
+        newSessions.slice(0, 3).map(s => 
+          ({
+            id: s.id, 
+            updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt, 
+            createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt, // この行を確実に含める
+            title: s.title 
+          })
+        )
+      );
     }
 
-    // ★ currentSession のデータをローカルの conversationSessions 配列と同期 ★
-    if (currentSession) {
-      const freshCurrentSession = conversationSessions.find(s => s.id === currentSession.id);
-      if (freshCurrentSession) {
-        currentSession = freshCurrentSession;
-      } else {
-        // currentSession が読み込まれたデータセットにない場合 (例: ページネーションの範囲外だがまだアクティブな場合)
-        // currentSession を conversationSessions の先頭に追加する (表示のため)
-        // ただし、currentSession の実体は別途 Firestore から取得・更新されているべき
-        // ここでは、もしリストになければ表示のために一時的に追加する。
-        // 理想的には、currentSession は常に最新状態で別途管理される。
-        // しかし、この関数は conversationSessions を Firestore からのデータで「更新」する役割なので、
-        // currentSession が古いデータセットに含まれていなければ、それはそれで正しい。
-        // updateSideMenu が currentSession を特別扱いして表示する。
-        console.log("Current session was not in the newly loaded batch from Firestore.");
-      }
+    if (newSessions.length < countToLoad) {
+      allHistoryLoaded = true;
+      console.log("All chat history loaded from Firestore.");
+    }
+
+    if (snapshot.docs.length > 0) {
+      lastVisibleDocFromFirestore = snapshot.docs[snapshot.docs.length - 1];
+    } else if (loadMore) {
+      allHistoryLoaded = true;
+      console.log("Load more returned 0 docs, assuming all history loaded.");
     }
     
+    const sessionMap = new Map();
+    conversationSessions.forEach(s => sessionMap.set(s.id, s));
+    newSessions.forEach(s => sessionMap.set(s.id, s));
+    
+    // conversationSessions を更新する前に、currentSession があればその情報を最新に保つ
+    if (currentSession) {
+        const currentInNew = newSessions.find(s => s.id === currentSession.id);
+        if (currentInNew) {
+            // Firestore から来た新しいデータで currentSession の一部を更新
+            currentSession.title = currentInNew.title;
+            currentSession.updatedAt = currentInNew.updatedAt; // Date オブジェクト
+            currentSession.createdAt = currentInNew.createdAt; // Date オブジェクト
+            currentSession.sessionState = currentInNew.sessionState;
+            // messages はローカルのものを維持するか、状況に応じてマージ戦略を検討
+            // currentSession.messages = currentInNew.messages; (単純上書きの場合)
+            console.log(`[updateSideMenuFromFirebase] Updated currentSession (ID: ${currentSession.id}) with data from new fetch.`);
+        }
+        // currentSession が sessionMap にも含まれるようにする
+        // (ただし、上で更新した currentSession オブジェクトそのものを入れる)
+        sessionMap.set(currentSession.id, { ...currentSession });
+    }
+
+    conversationSessions = Array.from(sessionMap.values());
+    
+    // ソートはFirestoreクエリで行っているので、ここでは原則不要だが、
+    // currentSession の特別扱いなどで順序が変わる可能性があるため、
+    // updateSideMenu 側で最終的な表示順を制御する。
+    // ただし、基本的なソートはここでもかけておくと安定する。
+    conversationSessions.sort((a, b) => {
+      const updatedAtComparison = b.updatedAt.getTime() - a.updatedAt.getTime();
+      if (updatedAtComparison !== 0) {
+        return updatedAtComparison;
+      }
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+
+
+    // currentSession がFirestoreからのバッチに含まれていない場合でも、
+    // ローカルにcurrentSessionが存在し、それがアクティブならconversationSessionsの先頭に追加する
+    // (このロジックは updateSideMenu 側と重複する可能性があるので、どちらで主に行うか検討)
+    // 現状の updateSideMenu のロジックで currentSession は特別扱いされるので、ここでは sessionMap を使ったマージとソートに注力。
+    // 以下の FIX ロジックは sessionMap によるマージでカバーされるか確認。
+    /*
+    if (currentSession) {
+      const freshCurrentSessionFromFirestore = conversationSessions.find(s => s.id === currentSession.id);
+      if (freshCurrentSessionFromFirestore) {
+        // ... (Firestoreからのデータでローカルの currentSession を更新) ...
+      } else if (currentSession.sessionState === 'active' || (currentSession.title === "無題" && (!currentSession.messages || currentSession.messages.length === 0))) {
+        const currentIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+        if (currentIndex === -1) {
+            conversationSessions.unshift({ ...currentSession });
+            console.log("[FIX] Current active session (ID:", currentSession.id, ") was not in Firestore batch. Added it manually to conversationSessions.");
+        }
+      }
+    }
+    */
+    
+    // 再度ソート (updateSideMenu 側でのソートと役割分担を明確に)
+    // conversationSessions.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    // → Firestore側でソートしているので、ここでは sessionMap からの復元時の順序維持で良いか、
+    //   もしくは明示的に再度ソートする。Firestoreのソート順を信頼する。
+
   } catch (error) {
     console.error("サイドメニュー更新エラー (Firestoreからの取得):", error);
-  } finally {
-    updateSideMenu(); // 取得データでUIを更新
-    showThinkingIndicator(false); // ★ インジケーター非表示 ★
   }
+  updateSideMenu(); 
 }
 
 function updateSideMenu() {
@@ -536,40 +629,39 @@ function updateSideMenu() {
   } else {
     historyDiv.classList.remove('delete-mode');
   }
-
-  // conversationSessions を updatedAt で降順ソート (表示前に必ずソート)
-  // currentSession は特別扱いするため、ここではソート対象から一旦外すか、
-  // currentSession の updatedAt が最新ならソート後も先頭に来るはず。
-  // ただし、表示上 currentSession を先頭に持ってくる処理があるので、
-  // ここでのソートは finishedSessions のみに適用しても良い。
   
   let sessionsToDisplay = [...conversationSessions];
   
-  // currentSession があれば、それをリストの先頭に持ってくる (もし配列内にあれば一度削除してから先頭に追加)
   if (currentSession) {
       const currentIndex = sessionsToDisplay.findIndex(s => s.id === currentSession.id);
       if (currentIndex > -1) {
-          sessionsToDisplay.splice(currentIndex, 1); // 配列から一度削除
+          sessionsToDisplay.splice(currentIndex, 1); 
       }
-      // currentSession の実体は最新であるべきなので、conversationSessions から見つからなくても currentSession 自身を使う
-      // ただし、表示のためには title などが必要
-      if (currentSession.title) { // title があれば表示対象として先頭に追加
+      if (currentSession.title) { 
           sessionsToDisplay.unshift(currentSession);
       }
   }
   
-  // 重複排除 (IDベースで)
   sessionsToDisplay = sessionsToDisplay.filter((session, index, self) =>
       index === self.findIndex((s) => (
           s.id === session.id
       ))
   );
 
-  // updatedAt で降順ソート (currentSession を先頭に置いた後で再度ソート)
-  // ただし、currentSession を除いた部分をソートするのが良いか。
-  // ここでは、currentSession を先頭に固定し、残りをソートする。
   let finishedSessionsForDisplay = sessionsToDisplay.filter(s => !currentSession || s.id !== currentSession.id);
-  finishedSessionsForDisplay.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  // finishedSessionsForDisplay.sort((a, b) => {
+  //   const updatedAtComparison = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  //   if (updatedAtComparison !== 0) {
+  //     return updatedAtComparison;
+  //   }
+  //   // updatedAtが同じ場合はcreatedAtで比較
+  //   return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  // });
+  finishedSessionsForDisplay.sort((a, b) => {
+    const aLatestActivity = Math.max(new Date(a.updatedAt).getTime(), new Date(a.createdAt).getTime());
+    const bLatestActivity = Math.max(new Date(b.updatedAt).getTime(), new Date(b.createdAt).getTime());
+    return bLatestActivity - aLatestActivity; // 降順ソート
+  });
 
   let finalSortedSessions = [];
   if (currentSession && currentSession.title) {
@@ -577,16 +669,30 @@ function updateSideMenu() {
   }
   finalSortedSessions = finalSortedSessions.concat(finishedSessionsForDisplay);
   
-  // 無題かつメッセージ空のセッションを除外 (currentSession は除く)
   finalSortedSessions = finalSortedSessions.filter(session => {
-      if (currentSession && session.id === currentSession.id) return true; // currentSession は常に表示
+      // 現在のセッションであれば、無題・空でも表示する
+      if (currentSession && session.id === currentSession.id) return true; 
+      
+      // それ以外のセッションは、無題かつメッセージが空の場合は非表示
       const isEmpty = !session.messages || session.messages.length === 0;
       const isUntitled = session.title === "無題";
       return !(isEmpty && isUntitled);
   });
 
+  // ★★★ デバッグログ追加 ★★★
+  console.log("Final sorted sessions to display in side menu (after filtering untitled/empty):", JSON.stringify(finalSortedSessions.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
+  // ★★★ ここまで ★★★
 
-  finalSortedSessions.forEach(session => {
+  // ★★★ デバッグログ追加 ★★★ (ソート後の全件)
+  console.log("Sorted sessions before slicing:", JSON.stringify(finalSortedSessions.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
+  
+  const displayLimit = INITIAL_LOAD_COUNT; // または直接 10
+  const sessionsForDisplayHtml = finalSortedSessions.slice(0, displayLimit);
+
+  // ★★★ デバッグログ追加 ★★★ (スライス後の表示対象)
+  console.log(`Sessions to display in HTML (limited to ${displayLimit}):`, JSON.stringify(sessionsForDisplayHtml.map(s => ({id: s.id, title: s.title, updatedAt: s.updatedAt, createdAt: s.createdAt, messagesCount: s.messages?.length || 0})), null, 2));
+
+  sessionsForDisplayHtml.forEach(session => {
     const link = document.createElement('a');
     link.href = "#";
     link.innerText = session.title || "無題"; // title が undefined の場合のフォールバック
@@ -685,21 +791,17 @@ async function startNewChat() {
   showThinkingIndicator(true);
 
   try {
-    // 空のアクティブセッションの再利用ロジックは createNewSession に統合、または 여기서 currentSession を設定後に updateSideMenuFromFirebase を呼ぶ
-    // 現状では createNewSession が呼ばれた後に updateSideMenuFromFirebase(false) を呼ぶ方が整理される
-
     if (currentSession && currentSession.sessionState === "active") {
       await endCurrentSession();
     }
     
-    await createNewSession(); // この中で currentSession が設定される
+    await createNewSession(); // currentSession と conversationSessions がここで更新される想定
 
-    // 新しいセッションが作成されたので、サイドメニューの履歴を初回ロード
-    // createNewSession の中で currentSession が設定された後が良い
-    // ただし、createNewSession は Promise を返すので、その完了後に実行
-    // await をつけたので、この行は createNewSession 完了後に実行される
-    console.log("New session created/reused, performing initial load for side menu.");
-    await updateSideMenuFromFirebase(false); // ★ createNewSession の後で呼び出し ★
+    console.log("New session created. Updating side menu immediately.");
+    updateSideMenu(); 
+    
+    console.log("Performing initial load for side menu from Firebase.");
+    await updateSideMenuFromFirebase(false); 
 
   } catch (error) {
     console.error("Error starting new chat:", error);
@@ -716,9 +818,9 @@ async function createNewSession() {
         return Promise.reject(new Error("User not logged in"));
     }
 
-    // 既存の空でアクティブなセッションを探す
+    // 既存の空でアクティブなセッションを探すロジックは現状維持
     const existingEmptySession = conversationSessions.find(
-        s => s.userId === currentUser.uid && // 念のため自分のセッションか確認
+        s => s.userId === currentUser.uid &&
              s.sessionState === "active" && 
              (!s.messages || s.messages.length === 0)
     );
@@ -726,15 +828,14 @@ async function createNewSession() {
     if (existingEmptySession) {
         console.log("既存の空のアクティブセッションを再利用します:", existingEmptySession.id);
         currentSession = existingEmptySession;
-        currentSession.updatedAt = new Date(); // 更新日時を更新
+        currentSession.updatedAt = new Date(); 
         document.getElementById('chatMessages').innerHTML = "";
         lastHeaderDate = null;
         scrollToBottom();
-        // updateSideMenu(); // ここでは呼ばず、startNewChat 側で updateSideMenuFromFirebase を呼ぶ
-        // Firestoreへの書き込みも必要なら行う (updatedAtの更新など)
-        // この再利用ロジックは startNewChat に移した方が良いかもしれない
-        // ここで currentSession を設定し、startNewChat の最後で updateSideMenuFromFirebase(false) を呼ぶ
-        return Promise.resolve(); // これで currentSession が設定される
+        // ★ 既存セッションを再利用する場合も conversationSessions の先頭に持ってくるか、
+        //    updateSideMenu が currentSession を特別扱いするロジックに任せる。
+        //    ここでは conversationSessions は変更せず、updateSideMenu に任せる。
+        return Promise.resolve(); 
     }
 
     console.log("Creating a new session document in Firestore.");
@@ -751,20 +852,29 @@ async function createNewSession() {
         userId: currentUser.uid
     };
     
-    const localSession = { ...sessionDataToSave };
-    localSession.createdAt = now;
-    localSession.updatedAt = now;
+    // Firestore に保存するデータとは別に、ローカルで保持する用のデータを作成
+    const localSessionForCurrent = {
+        id: sessionId,
+        title: "無題",
+        messages: [],
+        createdAt: now, // Dateオブジェクト
+        updatedAt: now, // Dateオブジェクト
+        sessionState: "active",
+        userId: currentUser.uid
+    };
 
-    // conversationSessions に追加する前に currentSession を設定
-    currentSession = localSession; 
+    // ★★★ 変更点ここから ★★★
+    // currentSession をまず設定
+    currentSession = localSessionForCurrent;
     
-    // conversationSessions にも追加 (updateSideMenuFromFirebase でクリアされるが、一時的に保持)
-    // この追加は updateSideMenuFromFirebase で Firestore から取得したものと重複する可能性があるが、
-    // updateSideMenu の重複排除ロジックで対応される想定。
-    // もしくは、createNewSession の時点では conversationSessions に追加せず、
-    // updateSideMenuFromFirebase で Firestore から取得されたものが conversationSessions に入るのを待つ。
-    // currentSession だけ設定しておけば、updateSideMenu が特別扱いしてくれる。
-    // conversationSessions.push(localSession); // 一旦コメントアウト
+    // conversationSessions の重複をチェックして、なければ先頭に追加
+    const existingIndexInCS = conversationSessions.findIndex(s => s.id === sessionId);
+    if (existingIndexInCS > -1) {
+        conversationSessions.splice(existingIndexInCS, 1); // 既存なら一度削除
+    }
+    conversationSessions.unshift({ ...localSessionForCurrent }); // 新しいセッションをローカルリストの先頭に追加
+    console.log(`New session ${sessionId} added to the beginning of local conversationSessions.`);
+    // ★★★ 変更点ここまで ★★★
 
     document.getElementById('chatMessages').innerHTML = "";
     lastHeaderDate = null;
@@ -773,10 +883,15 @@ async function createNewSession() {
     try {
         await db.collection("chatSessions").doc(sessionId).set(sessionDataToSave);
         console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
-        // updateSideMenu(); // ここでは呼ばず、startNewChat 側で updateSideMenuFromFirebase を呼ぶ
     } catch (error) {
         console.error("新規セッションのFirestore書き込みエラー:", error);
-        currentSession = null; // 作成失敗時は currentSession を戻すかクリア
+        // エラー時は currentSession をnullに戻すか、前の状態に戻す
+        // conversationSessions からも削除する
+        const errorIndex = conversationSessions.findIndex(s => s.id === sessionId);
+        if (errorIndex > -1) {
+            conversationSessions.splice(errorIndex, 1);
+        }
+        currentSession = null; // または以前のセッション
         throw error;
     }
 }
@@ -986,13 +1101,20 @@ async function callGemini(userInput) {
             }
 
             // ★ AIの応答をセッションデータに追加 ★
+            if (!currentSession.messages) currentSession.messages = [];
             currentSession.messages.push({
                 sender: 'Gemini',
                 text: finalAnswer,
                 timestamp: new Date(),
                 sources: finalSources // sources は Refinement 前のものを保持
             });
-            currentSession.updatedAt = new Date().toISOString(); // backupでTimestampになる
+            currentSession.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
+
+            const geminiSessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+            if (geminiSessionIndex > -1) {
+                conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                // conversationSessions[geminiSessionIndex].messages = [...currentSession.messages]; // 同様に検討
+            }
 
             // ★ 最終的な回答を表示 (考え中メッセージを更新 or 新規追加) ★
             if (loadingRow && loadingText) {
@@ -1036,19 +1158,39 @@ async function callGemini(userInput) {
                 summarizeSessionAsync(currentSession).then(async (summary) => {
                      if (summary && summary !== "無題") {
                          currentSession.title = summary;
-                         currentSession.updatedAt = new Date().toISOString(); 
+                         currentSession.updatedAt = new Date();  // ★ Date オブジェクトで設定 ★
                          console.log("Session title updated by summary:", summary);
+
+                         const summarySessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+                         if (summarySessionIndex > -1) {
+                             conversationSessions[summarySessionIndex].title = currentSession.title;
+                             conversationSessions[summarySessionIndex].updatedAt = currentSession.updatedAt;
+                         }
                          updateSideMenu();
-                         await backupToFirebase(); // タイトル更新後にバックアップ
+                         await backupToFirebase(); 
                      } else {
-                         await backupToFirebase(); // 要約失敗/不要でもバックアップ
+                         // タイトルが「無題」のまま or 要約失敗でも updatedAt は更新されているのでバックアップ
+                         currentSession.updatedAt = new Date(); //念のため最新に
+                         if (geminiSessionIndex > -1) { // summarizeSessionAsync の前の index を再利用
+                            conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                         }
+                         await backupToFirebase(); 
                      }
                 }).catch(async (error) => {
                      console.error("Background session summary failed:", error);
-                     await backupToFirebase(); // 要約エラーでもバックアップ
+                     currentSession.updatedAt = new Date(); // エラー時も updatedAt を更新してバックアップ
+                     if (geminiSessionIndex > -1) {
+                        conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                     }
+                     await backupToFirebase(); 
                 });
             } else {
-                 await backupToFirebase(); // タイトルありの場合もここでバックアップ
+                 // タイトルが既に存在する場合も updatedAt を更新してバックアップ
+                 currentSession.updatedAt = new Date();
+                 if (geminiSessionIndex > -1) {
+                    conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                 }
+                 await backupToFirebase(); 
             }
             // ★★★ 移動ここまで ★★★
 
@@ -1095,19 +1237,39 @@ async function callGemini(userInput) {
                 summarizeSessionAsync(currentSession).then(async (summary) => {
                      if (summary && summary !== "無題") {
                          currentSession.title = summary;
-                         currentSession.updatedAt = new Date().toISOString(); 
+                         currentSession.updatedAt = new Date();  // ★ Date オブジェクトで設定 ★
                          console.log("Session title updated by summary:", summary);
+
+                         const summarySessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
+                         if (summarySessionIndex > -1) {
+                             conversationSessions[summarySessionIndex].title = currentSession.title;
+                             conversationSessions[summarySessionIndex].updatedAt = currentSession.updatedAt;
+                         }
                          updateSideMenu();
-                         await backupToFirebase(); // タイトル更新後にバックアップ
+                         await backupToFirebase(); 
                      } else {
-                         await backupToFirebase(); // 要約失敗/不要でもバックアップ
+                         // タイトルが「無題」のまま or 要約失敗でも updatedAt は更新されているのでバックアップ
+                         currentSession.updatedAt = new Date(); //念のため最新に
+                         if (geminiSessionIndex > -1) { // summarizeSessionAsync の前の index を再利用
+                            conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                         }
+                         await backupToFirebase(); 
                      }
                 }).catch(async (error) => {
                      console.error("Background session summary failed:", error);
-                     await backupToFirebase(); // 要約エラーでもバックアップ
+                     currentSession.updatedAt = new Date(); // エラー時も updatedAt を更新してバックアップ
+                     if (geminiSessionIndex > -1) {
+                        conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                     }
+                     await backupToFirebase(); 
                 });
             } else {
-                 await backupToFirebase(); // タイトルありの場合もここでバックアップ
+                 // タイトルが既に存在する場合も updatedAt を更新してバックアップ
+                 currentSession.updatedAt = new Date();
+                 if (geminiSessionIndex > -1) {
+                    conversationSessions[geminiSessionIndex].updatedAt = currentSession.updatedAt;
+                 }
+                 await backupToFirebase(); 
             }
             // ★★★ 移動ここまで ★★★
 
@@ -1140,7 +1302,7 @@ async function buildRefinementPrompt(context, originalAnswer) {
     console.log("Building refinement prompt...");
     // context には、台湾華語モードの場合は翻訳結果、それ以外は会話履歴が入る想定
     // 台湾華語モードかどうかの判定はここでは難しいので、プロンプトを汎用的にする
-    return `以下のテキストの語尾を、親しみやすいキャラクターのように「だゾウ」に変えてください。元のテキストの意味や言語（例：中国語）は維持してください。
+    return `あなたは、応答の語尾をすべて「だゾウ」で終える、親しみやすいゾウのキャラクターです。以下の【元のテキスト】を受け取り、その内容と意味を完全に維持したまま、自然な形で全ての文末が「だゾウ」になるように修正してください。修正されたテキストのみを出力し、それ以外の前置きや説明は一切含めないでください。
 
 【元のテキスト】
 ${originalAnswer}
@@ -1164,18 +1326,21 @@ async function summarizeSessionAsync(session) {
 
 async function updateUntitledSessions() {
   console.log("updateUntitledSessions called");
+  let changed = false; 
   for (const session of conversationSessions) {
     if (session.title === "無題" && session.messages && session.messages.length > 0) {
       console.log(`セッション ${session.id} のタイトルを要約処理で更新します。`);
-      const summary = await summarizeSessionAsync(session);
+      const summary = await summarizeSessionAsync(session); 
       if (typeof summary === "string" && summary.trim() && summary.trim() !== "無題") {
         session.title = summary.trim();
-        session.updatedAt = new Date().toISOString();
-        await db.collection("chatSessions").doc(session.id).set(session);
+        session.updatedAt = new Date(); // ★ Date オブジェクトで設定 ★
+        changed = true;
       }
     }
   }
-  updateSideMenu();
+  if (changed) { 
+    updateSideMenu();
+  }
 }
 
 async function backupToFirebase() {
@@ -1191,80 +1356,116 @@ async function backupToFirebase() {
   }
 
   try {
-    const sessionDataToSave = { ...currentSession };
-    sessionDataToSave.userId = currentUser.uid;
-    sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
+    const sessionDataToSave = { 
+        ...currentSession,
+        userId: currentUser.uid 
+    };
+
+    // updatedAt を Firestore Timestamp に変換
+    console.log("[backupToFirebase] Converting updatedAt. Original value:", currentSession.updatedAt, "Type:", typeof currentSession.updatedAt);
+    if (currentSession.updatedAt instanceof Date && !isNaN(currentSession.updatedAt.getTime())) {
+        sessionDataToSave.updatedAt = firebase.firestore.Timestamp.fromDate(currentSession.updatedAt);
+    } else if (currentSession.updatedAt) { 
+        try {
+            const dateObj = new Date(currentSession.updatedAt);
+            if (!isNaN(dateObj.getTime())) {
+                sessionDataToSave.updatedAt = firebase.firestore.Timestamp.fromDate(dateObj);
+            } else {
+                console.warn("Invalid date value for updatedAt (conversion failed):", currentSession.updatedAt, "Using current time instead.");
+                sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
+            }
+        } catch (e) {
+            console.warn("Error converting updatedAt to Date:", currentSession.updatedAt, e, "Using current time instead.");
+            sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
+        }
+    } else {
+        console.warn("updatedAt is missing or invalid, using current time instead.");
+        sessionDataToSave.updatedAt = firebase.firestore.Timestamp.now();
+    }
+
+    // createdAt を Firestore Timestamp に変換
+    console.log("[backupToFirebase] Converting createdAt. Original value:", currentSession.createdAt, "Type:", typeof currentSession.createdAt);
+    if (currentSession.createdAt instanceof Date && !isNaN(currentSession.createdAt.getTime())) {
+        sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(currentSession.createdAt);
+    } else if (currentSession.createdAt) {
+        try {
+            const dateObj = new Date(currentSession.createdAt);
+            if (!isNaN(dateObj.getTime())) {
+                sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(dateObj);
+            } else {
+                console.warn("Invalid date value for createdAt (conversion failed):", currentSession.createdAt, "Using current time instead.");
+                sessionDataToSave.createdAt = firebase.firestore.Timestamp.now();
+            }
+        } catch (e) {
+            console.warn("Error converting createdAt to Date:", currentSession.createdAt, e, "Using current time instead.");
+            sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); 
+        }
+    } else {
+        console.warn("createdAt is missing or invalid, using current time instead.");
+        sessionDataToSave.createdAt = firebase.firestore.Timestamp.now();
+    }
 
     // messages 配列内の timestamp を Firestore Timestamp に変換し、sources を削除
     if (sessionDataToSave.messages && Array.isArray(sessionDataToSave.messages)) {
       sessionDataToSave.messages = sessionDataToSave.messages.map(msg => {
-        const newMsg = { ...msg }; // メッセージオブジェクトをコピー
-        
-        // timestamp を Firestore Timestamp に変換
-        if (newMsg.timestamp) {
-          try {
-            const date = new Date(getTimestampValue(newMsg.timestamp)); // 既存の値からDateオブジェクト作成
-            newMsg.timestamp = firebase.firestore.Timestamp.fromDate(date);
-          } catch (e) {
-            console.warn("Failed to convert timestamp for message:", msg, e);
-            // 変換に失敗した場合は元の値かnull/undefinedを設定
-            // newMsg.timestamp = null; 
-          }
+        const newMsg = { ...msg };
+        console.log("[backupToFirebase] Converting message timestamp. Original value:", msg.timestamp, "Type:", typeof msg.timestamp);
+        if (msg.timestamp instanceof Date && !isNaN(msg.timestamp.getTime())) {
+          newMsg.timestamp = firebase.firestore.Timestamp.fromDate(msg.timestamp);
+        } else if (msg.timestamp) { 
+            try {
+                // getTimestampValue は Date.parse と同等の振る舞いをする可能性があるため、
+                // new Date() で直接 Date オブジェクトを試みる方が安全か、
+                // もしくは getTimestampValue の結果をさらに new Date() に通す。
+                // ここでは直接 new Date() を試みる。
+                const dateObj = new Date(getTimestampValue(msg.timestamp)); // getTimestampValueはミリ秒を返す想定
+                if (!isNaN(dateObj.getTime())) {
+                    newMsg.timestamp = firebase.firestore.Timestamp.fromDate(dateObj);
+                } else {
+                    console.warn("Invalid date value for message timestamp (conversion failed):", msg.timestamp, "Using current time instead.");
+                    newMsg.timestamp = firebase.firestore.Timestamp.now();
+                }
+            } catch(e) {
+                console.warn("Error converting message timestamp to Date:", msg.timestamp, e, "Using current time instead.");
+                newMsg.timestamp = firebase.firestore.Timestamp.now();
+            }
         } else {
-           newMsg.timestamp = firebase.firestore.Timestamp.now(); // timestamp がなければ現在時刻
+           console.warn("Message timestamp is missing or invalid, using current time instead.");
+           newMsg.timestamp = firebase.firestore.Timestamp.now();
         }
-        
-        // ★ デバッグのため sources を削除 ★
         delete newMsg.sources;
-        
         return newMsg;
       });
     }
 
-    // createdAt も Firestore Timestamp に変換 (もし文字列なら)
-    if (sessionDataToSave.createdAt && typeof sessionDataToSave.createdAt === 'string') {
-        try {
-            sessionDataToSave.createdAt = firebase.firestore.Timestamp.fromDate(new Date(sessionDataToSave.createdAt));
-        } catch(e) {
-             console.warn("Failed to convert createdAt:", sessionDataToSave.createdAt, e);
-             // 失敗した場合は現在時刻などで代替も検討
-             sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); 
-        }
-    } else if (!sessionDataToSave.createdAt) {
-        sessionDataToSave.createdAt = firebase.firestore.Timestamp.now(); // なければ現在時刻
-    }
-
     const sessionDocRef = db.collection("chatSessions").doc(sessionDataToSave.id);
-    
-    // ★ 整形したデータ (sessionDataToSave) を書き込む ★
     await sessionDocRef.set(sessionDataToSave); 
     console.log(`Session ${sessionDataToSave.id} backed up successfully (/chatSessions).`);
 
-    // ★ 追加: ローカルの currentSession も更新 ★
+    // バックアップ成功後、ローカルの currentSession のタイムスタンプも Date オブジェクトに更新
     if (currentSession && currentSession.id === sessionDataToSave.id) {
-        currentSession.messages = sessionDataToSave.messages.map(msg => {
-             // Firestore Timestamp を Date オブジェクトに戻す
-             const localMsg = { ...msg };
-             if (localMsg.timestamp && localMsg.timestamp.toDate) {
-                 localMsg.timestamp = localMsg.timestamp.toDate();
-             }
-             // sources は sessionDataToSave にないので、ここでは追加しない
-             return localMsg;
-         });
-        currentSession.updatedAt = sessionDataToSave.updatedAt.toDate(); // Timestamp を Date に戻す
-        console.log("Local currentSession updated after successful backup.");
+        if (sessionDataToSave.updatedAt && sessionDataToSave.updatedAt.toDate) {
+            currentSession.updatedAt = sessionDataToSave.updatedAt.toDate(); 
+        }
+        if (sessionDataToSave.createdAt && sessionDataToSave.createdAt.toDate) {
+            currentSession.createdAt = sessionDataToSave.createdAt.toDate();
+        }
+        if (sessionDataToSave.messages && Array.isArray(sessionDataToSave.messages)) {
+            currentSession.messages = sessionDataToSave.messages.map(msg => {
+                 const localMsg = { ...msg }; 
+                 if (localMsg.timestamp && localMsg.timestamp.toDate) {
+                     localMsg.timestamp = localMsg.timestamp.toDate();
+                 }
+                 return localMsg;
+             });
+        }
+        console.log("Local currentSession's timestamps and messages updated after successful backup.");
     }
-    // ★ 追加ここまで ★
 
   } catch (error) {
-    // ★ 詳細なエラー情報をログに出力 ★
     console.error(`バックアップエラー (Session ID: ${currentSession?.id}):`, error);
-    if (error.code) {
-      console.error(`Firestore Error Code: ${error.code}`);
-    }
-    if (error.message) {
-      console.error(`Firestore Error Message: ${error.message}`);
-    }
+    if (error.code) console.error(`Firestore Error Code: ${error.code}`);
+    if (error.message) console.error(`Firestore Error Message: ${error.message}`);
   }
 }
 
@@ -1969,3 +2170,270 @@ function adjustSpeechBubbleFontSize() {
 
 // ★ toggleRecording の実装 (適切な位置に定義) ★
 // ... (変更なし)
+
+// ★★★ データ正規化用のヘルパー関数ここから ★★★
+
+/**
+ * 'yyyy-mm-dd' または 'yyyy年mm月dd日' または ISO8601 形式の文字列をDateオブジェクトに変換する
+ * @param {string} dateString 日付文字列
+ * @returns {Date|null} 変換後のDateオブジェクト、または変換失敗時はnull
+ */
+function parseDateString(dateString) {
+  if (!dateString || typeof dateString !== 'string') {
+    return null;
+  }
+
+  // ISO 8601 形式 (例: "2025-03-29T07:48:23.683Z") のチェックをまず試みる
+  // new Date() はISO 8601形式を解釈できる
+  const isoDate = new Date(dateString);
+  if (!isNaN(isoDate.getTime()) && dateString.includes('T') && dateString.includes('Z')) { // 簡単なISO形式のチェック
+      return isoDate;
+  }
+
+  // yyyy-mm-dd 形式のチェック
+  let match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1; // Month is 0-indexed
+    const day = parseInt(match[3], 10);
+    const d = new Date(Date.UTC(year, month, day, 0, 0, 0));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // yyyy年mm月dd日 形式のチェック
+  match = dateString.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
+  if (match) {
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1; // Month is 0-indexed
+    const day = parseInt(match[3], 10);
+    const d = new Date(Date.UTC(year, month, day, 0, 0, 0));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  console.warn("Unsupported or ambiguous date string format for parseDateString:", dateString);
+  return null;
+}
+
+/**
+ * ユーザーの全てのチャットセッションの updatedAt フィールドを正規化する
+ * 文字列型の場合はFirestoreのTimestamp型に変換して更新する
+ */
+async function normalizeAllSessionsUpdatedAt() {
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("正規化処理: ユーザーがログインしていません。");
+    alert("正規化処理: ユーザーがログインしていません。");
+    return;
+  }
+
+  console.log("正規化処理: 開始 (ユーザーID:", currentUser.uid, ")");
+  alert("チャット履歴の updatedAt フィールドの正規化処理を開始します。開発者コンソールで進捗を確認してください。処理には時間がかかる場合があります。");
+
+  try {
+    const chatSessionsRef = firebase.firestore().collection('chatSessions').where('userId', '==', currentUser.uid);
+    const snapshot = await chatSessionsRef.get();
+
+    if (snapshot.empty) {
+      console.log("正規化処理: 対象となるチャットセッションが見つかりませんでした。");
+      alert("正規化処理: 対象となるチャットセッションが見つかりませんでした。");
+      return;
+    }
+
+    let processedCount = 0;
+    let updatedCount = 0;
+    let errorCount = 0;
+    // let skippedYyyyMmDdCount = 0; // yyyy-mm-dd 形式のスキップは不要になったためコメントアウト
+    const batchSize = 100; 
+    let batch = firebase.firestore().batch();
+    let batchOperations = 0;
+
+    for (const doc of snapshot.docs) {
+      processedCount++;
+      const sessionData = doc.data();
+      const sessionId = doc.id;
+
+      if (sessionData.updatedAt && typeof sessionData.updatedAt === 'string') {
+        // yyyy-mm-dd 形式のチェックとスキップ処理を削除
+        // const yyyy_mm_dd_regex = /^\d{4}-\d{2}-\d{2}$/;
+        // if (yyyy_mm_dd_regex.test(sessionData.updatedAt)) {
+        //   console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt}') は 'yyyy-mm-dd' 形式のため、今回はスキップします。`);
+        //   skippedYyyyMmDdCount++;
+        //   continue; 
+        // }
+
+        console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt}') は文字列です。変換を試みます。`);
+        const dateObject = parseDateString(sessionData.updatedAt); // yyyy-mm-dd もここで処理される
+
+        if (dateObject) {
+          try {
+            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(dateObject);
+            batch.update(doc.ref, { updatedAt: firestoreTimestamp });
+            batchOperations++;
+            updatedCount++;
+            console.log(`正規化処理: セッションID ${sessionId} をTimestamp (${firestoreTimestamp.toDate().toISOString()}) に更新予定。`);
+
+            if (batchOperations >= batchSize) {
+              console.log(`正規化処理: ${batchOperations} 件のバッチをコミットします...`);
+              await batch.commit();
+              console.log("正規化処理: バッチコミット完了。");
+              batch = firebase.firestore().batch(); 
+              batchOperations = 0;
+              await new Promise(resolve => setTimeout(resolve, 500)); 
+            }
+          } catch (e) {
+            console.error(`正規化処理: セッションID ${sessionId} のTimestamp変換またはバッチ追加でエラー:`, e, "元の値:", sessionData.updatedAt);
+            errorCount++;
+          }
+        } else {
+          console.warn(`正規化処理: セッションID ${sessionId} のupdatedAt ('${sessionData.updatedAt}') をDateオブジェクトに変換できませんでした。スキップします。`);
+          errorCount++;
+        }
+      } else if (sessionData.updatedAt && sessionData.updatedAt.toDate && typeof sessionData.updatedAt.toDate === 'function') {
+        // 既にTimestamp型
+      } else if (sessionData.updatedAt instanceof Date) {
+         console.log(`正規化処理: セッションID ${sessionId} の updatedAt ('${sessionData.updatedAt.toISOString()}') はJavaScriptのDateオブジェクトです。Timestampに変換します。`);
+         try {
+            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(sessionData.updatedAt);
+            batch.update(doc.ref, { updatedAt: firestoreTimestamp });
+            batchOperations++;
+            updatedCount++;
+            if (batchOperations >= batchSize) {
+              console.log(`正規化処理: ${batchOperations} 件のバッチをコミットします...`);
+              await batch.commit();
+              console.log("正規化処理: バッチコミット完了。");
+              batch = firebase.firestore().batch();
+              batchOperations = 0;
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+         } catch (e) {
+            console.error(`正規化処理: セッションID ${sessionId} のDateからTimestamp変換またはバッチ追加でエラー:`, e);
+            errorCount++;
+         }
+      } else if (!sessionData.updatedAt) {
+        console.warn(`正規化処理: セッションID ${sessionId} に updatedAt フィールドが存在しません。スキップします。`);
+        errorCount++;
+      } else {
+        console.warn(`正規化処理: セッションID ${sessionId} の updatedAt は予期しない型です:`, sessionData.updatedAt, "スキップします。");
+        errorCount++;
+      }
+    }
+
+    if (batchOperations > 0) {
+      console.log(`正規化処理: 残り ${batchOperations} 件のバッチをコミットします...`);
+      await batch.commit();
+      console.log("正規化処理: 最終バッチコミット完了。");
+    }
+
+    console.log("正規化処理: 完了。");
+    // console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, 'yyyy-mm-dd'形式スキップ数: ${skippedYyyyMmDdCount}, その他エラー/スキップ数: ${errorCount}`);
+    console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, エラー/スキップ数: ${errorCount}`);
+    alert(`正規化処理が完了しました。
+総処理: ${processedCount}件
+更新: ${updatedCount}件
+エラー/スキップ: ${errorCount}件
+詳細は開発者コンソールを確認してください。ページをリロードして動作を確認してください。`);
+// 'yyyy-mm-dd'形式スキップは削除したため、アラートからも削除
+
+  } catch (error) {
+    console.error("正規化処理中にエラーが発生しました:", error);
+    alert("正規化処理中にエラーが発生しました。詳細は開発者コンソールを確認してください。");
+  }
+}
+// ★★★ データ正規化用のヘルパー関数ここまで ★★★
+
+// ★★★ createdAt データ正規化用のヘルパー関数ここから ★★★
+
+/**
+ * ユーザーの全てのチャットセッションの createdAt フィールドを正規化する
+ * 文字列型やDateオブジェクトの場合はFirestoreのTimestamp型に変換して更新する
+ */
+async function normalizeAllSessionsCreatedAt() {
+  const currentUser = firebase.auth().currentUser;
+  if (!currentUser) {
+    console.error("createdAt正規化: ユーザーがログインしていません。");
+    alert("createdAt正規化: ユーザーがログインしていません。");
+    return;
+  }
+
+  console.log("createdAt正規化: 開始 (ユーザーID:", currentUser.uid, ")");
+  alert("チャット履歴の createdAt フィールドの正規化処理を開始します。開発者コンソールで進捗を確認してください。処理には時間がかかる場合があります。");
+
+  try {
+    const chatSessionsRef = firebase.firestore().collection('chatSessions').where('userId', '==', currentUser.uid);
+    const snapshot = await chatSessionsRef.get();
+
+    if (snapshot.empty) {
+      console.log("createdAt正規化: 対象となるチャットセッションが見つかりませんでした。");
+      alert("createdAt正規化: 対象となるチャットセッションが見つかりませんでした。");
+      return;
+    }
+
+    let processedCount = 0;
+    let updatedCount = 0;
+    let errorCount = 0;
+    const batchSize = 100;
+    let batch = firebase.firestore().batch();
+    let batchOperations = 0;
+
+    for (const doc of snapshot.docs) {
+      processedCount++;
+      const sessionData = doc.data();
+      const sessionId = doc.id;
+
+      if (sessionData.createdAt && (typeof sessionData.createdAt === 'string' || sessionData.createdAt instanceof Date || (typeof sessionData.createdAt === 'object' && sessionData.createdAt.seconds === undefined && sessionData.createdAt.nanoseconds === undefined && !(sessionData.createdAt.toDate)) ) ) {
+        // 文字列、Dateオブジェクト、またはTimestamp型ではないプレーンなオブジェクト（toDateなし、seconds/nanosecondsなし）の場合
+        console.log(`createdAt正規化: セッションID ${sessionId} の createdAt ('${JSON.stringify(sessionData.createdAt)}') は変換対象です。変換を試みます。`);
+        const dateObject = sessionData.createdAt instanceof Date ? sessionData.createdAt : parseDateString(String(sessionData.createdAt)); // parseDateStringは文字列を期待
+
+        if (dateObject && !isNaN(dateObject.getTime())) {
+          try {
+            const firestoreTimestamp = firebase.firestore.Timestamp.fromDate(dateObject);
+            batch.update(doc.ref, { createdAt: firestoreTimestamp });
+            batchOperations++;
+            updatedCount++;
+            console.log(`createdAt正規化: セッションID ${sessionId} をTimestamp (${firestoreTimestamp.toDate().toISOString()}) に更新予定。`);
+
+            if (batchOperations >= batchSize) {
+              console.log(`createdAt正規化: ${batchOperations} 件のバッチをコミットします...`);
+              await batch.commit();
+              console.log("createdAt正規化: バッチコミット完了。");
+              batch = firebase.firestore().batch();
+              batchOperations = 0;
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          } catch (e) {
+            console.error(`createdAt正規化: セッションID ${sessionId} のTimestamp変換またはバッチ追加でエラー:`, e, "元の値:", sessionData.createdAt);
+            errorCount++;
+          }
+        } else {
+          console.warn(`createdAt正規化: セッションID ${sessionId} のcreatedAt ('${JSON.stringify(sessionData.createdAt)}') をDateオブジェクトに変換できませんでした。スキップします。`);
+          errorCount++;
+        }
+      } else if (sessionData.createdAt && typeof sessionData.createdAt.toDate === 'function') {
+        // 既にTimestamp型の場合は何もしない
+        // console.log(`createdAt正規化: セッションID ${sessionId} の createdAt は既にTimestamp型です。スキップします。`);
+      } else if (!sessionData.createdAt) {
+        console.warn(`createdAt正規化: セッションID ${sessionId} に createdAt フィールドが存在しません。スキップします。`);
+        errorCount++;
+      } else {
+        console.warn(`createdAt正規化: セッションID ${sessionId} の createdAt は予期しない型、または既にTimestampの可能性があります:`, sessionData.createdAt, "スキップします。");
+        // errorCount++; // 既にTimestampの可能性もあるため、ここではカウントしないか、より厳密な型チェックを parseDateString に任せる
+      }
+    }
+
+    if (batchOperations > 0) {
+      console.log(`createdAt正規化: 残り ${batchOperations} 件のバッチをコミットします...`);
+      await batch.commit();
+      console.log("createdAt正規化: 最終バッチコミット完了。");
+    }
+
+    console.log("createdAt正規化: 完了。");
+    console.log(`結果: 総処理ドキュメント数: ${processedCount}, 更新ドキュメント数: ${updatedCount}, エラー/スキップ数: ${errorCount}`);
+    alert(`createdAtの正規化処理が完了しました。\n総処理: ${processedCount}件\n更新: ${updatedCount}件\nエラー/スキップ: ${errorCount}件\n詳細は開発者コンソールを確認してください。`);
+
+  } catch (error) {
+    console.error("createdAt正規化処理中にエラーが発生しました:", error);
+    alert("createdAt正規化処理中にエラーが発生しました。詳細は開発者コンソールを確認してください。");
+  }
+}
+// ★★★ createdAt データ正規化用のヘルパー関数ここまで ★★★

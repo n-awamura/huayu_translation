@@ -757,3 +757,31 @@ body {
     position: fixed;
     /* ... (他のサイドメニュースタイル) ... */
 }
+
+/* css/style.css に追加するスタイル例 */
+.load-more-btn {
+  display: block;
+  width: calc(100% - 20px); /* 左右のパディングを考慮 */
+  padding: 8px 10px;
+  margin: 10px auto 5px auto; /* 上下にマージン、左右は自動で中央揃え */
+  background-color: var(--header-bg-color); /* ★ ヘッダー背景色に合わせる */
+  color: var(--header-text-color); /* ★ ヘッダーテキスト色に合わせる */
+  border: 1px solid var(--header-text-color); /* ★ ヘッダーテキスト色に合わせる */
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.3s, color 0.3s, border-color 0.3s; /* ホバー時のトランジション */
+}
+
+.load-more-btn:hover {
+  background-color: var(--header-text-color); /* ★ ホバー時はヘッダーテキスト色（茶色）を背景に */
+  color: var(--header-bg-color); /* ★ ホバー時はヘッダー背景色（黄色）を文字色に */
+  border-color: var(--header-text-color); /* ★ 枠線はそのままヘッダーテキスト色（茶色） */
+}
+
+.no-more-history {
+  color: #a0aec0; /* Tailwindのgray.500に近い色 */
+  text-align: center;
+  padding: 10px;
+  font-size: 0.9em;
+}

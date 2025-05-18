@@ -9,6 +9,10 @@ let recognition = null; // 追加: SpeechRecognition インスタンス
 let isRecording = false; // 追加: 録音状態フラグ
 let isCreatingNewSession = false; // ★ New Chat 連打防止フラグ
 let firebaseUiInitialized = false; // ★ FirebaseUI 初期化済みフラグを追加 ★
+let lastVisibleDocFromFirestore = null; // ★ ページネーション用: 最後に読み込んだFirestoreドキュメント ★
+let allHistoryLoaded = false; // ★ ページネーション用: 全履歴読み込み完了フラグ ★
+const INITIAL_LOAD_COUNT = 10; // ★ ページネーション用: 初期読み込み件数 ★
+const LOAD_MORE_COUNT = 5; // ★ ページネーション用: 追加読み込み件数 ★
 
 // ==============================
 // ユーティリティ関数
@@ -400,158 +404,242 @@ async function onSendButton() {
   await callGemini(message);
 }
 
-function toggleSideMenu() {
+async function toggleSideMenu() {
   console.log("toggleSideMenu called");
   const sideMenu = document.getElementById('side-menu');
   sideMenu.classList.toggle('open');
   if (sideMenu.classList.contains('open')) {
-    updateSideMenuFromFirebase();
+    // サイドメニューを開くときに常に初回ロードとして履歴を更新
+    updateSideMenuFromFirebase(false); 
   }
 }
 
-async function updateSideMenuFromFirebase() {
-  console.log("updateSideMenuFromFirebase called");
+async function updateSideMenuFromFirebase(loadMore = false) {
+  console.log(`updateSideMenuFromFirebase called, loadMore: ${loadMore}`);
   const currentUser = firebase.auth().currentUser;
   if (!currentUser) {
     console.error("ユーザーがログインしていません。サイドメニューを更新できません。");
     return;
   }
+
+  showThinkingIndicator(true); // ★ ロード中にインジケーター表示 ★
+
   try {
-    const querySnapshot = await db.collection("chatSessions")
-                                  .where("userId", "==", currentUser.uid)
-                                  .get();
-    conversationSessions = [];
-    querySnapshot.forEach(doc => {
-      let sessionData = doc.data();
-      // --- Timestamp 変換処理を追加 ---
-      if (sessionData.createdAt && sessionData.createdAt.toDate) {
-          sessionData.createdAt = sessionData.createdAt.toDate();
-      }
-      if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
-          sessionData.updatedAt = sessionData.updatedAt.toDate();
-      }
-      if (sessionData.messages && Array.isArray(sessionData.messages)) {
-          sessionData.messages = sessionData.messages.map(msg => {
-              const localMsg = { ...msg };
-              if (localMsg.timestamp && localMsg.timestamp.toDate) {
-                  localMsg.timestamp = localMsg.timestamp.toDate();
-              }
-              // sources は Firestore に保存していないので、何もしない
-              return localMsg;
-          });
-      }
-      // --- 変換処理ここまで ---
-      conversationSessions.push(sessionData);
-    });
+    let query = db.collection("chatSessions")
+                  .where("userId", "==", currentUser.uid)
+                  .orderBy("updatedAt", "desc");
 
-    // ★ 追加: ローカルの currentSession の方が新しければ上書き ★
-    if (currentSession) {
-        const sessionIndex = conversationSessions.findIndex(s => s.id === currentSession.id);
-        if (sessionIndex !== -1) {
-            // Firestore から取得したデータとローカルの updatedAt を比較
-            const firestoreUpdatedAt = conversationSessions[sessionIndex].updatedAt;
-            const localUpdatedAt = currentSession.updatedAt instanceof Date ? currentSession.updatedAt : new Date(currentSession.updatedAt);
+    if (loadMore) {
+      if (allHistoryLoaded) {
+        console.log("全履歴読み込み済みのため、追加読み込みをスキップします。");
+        showThinkingIndicator(false);
+        return;
+      }
+      if (!lastVisibleDocFromFirestore) {
+        console.warn("追加読み込みの開始ドキュメントがありません。初回読み込みとして扱います。");
+        // Fallback to initial load if lastVisibleDoc is missing for some reason
+        // This case should ideally not happen if logic is correct.
+        loadMore = false; 
+      } else {
+        query = query.startAfter(lastVisibleDocFromFirestore).limit(LOAD_MORE_COUNT);
+      }
+    }
+    
+    if (!loadMore) { // Initial load or fallback from problematic loadMore
+      allHistoryLoaded = false;
+      lastVisibleDocFromFirestore = null;
+      // conversationSessions は Firestore から取得後にクリア＆再構築する
+      query = query.limit(INITIAL_LOAD_COUNT);
+    }
 
-            // getTime() で比較するのが確実
-            if (firestoreUpdatedAt && localUpdatedAt && localUpdatedAt.getTime() > firestoreUpdatedAt.getTime()) {
-                 console.log(`Local currentSession (ID: ${currentSession.id}) is newer. Updating conversationSessions array.`);
-                 conversationSessions[sessionIndex] = { ...currentSession }; // ローカルのデータで上書き
-            } else if (!firestoreUpdatedAt && localUpdatedAt) {
-                 // Firestore に updatedAt がないがローカルにはある場合もローカル優先
-                 console.log(`Local currentSession (ID: ${currentSession.id}) has updatedAt, Firestore version doesn't. Updating conversationSessions array.`);
-                 conversationSessions[sessionIndex] = { ...currentSession };
-            }
-        } else {
-             // Firestore にデータがないがローカルには currentSession が存在する場合 (バックアップ直後など)
-             console.log(`Local currentSession (ID: ${currentSession.id}) not found in Firestore results after update. Adding it to conversationSessions array.`);
-             conversationSessions.push({ ...currentSession });
+    const querySnapshot = await query.get();
+
+    if (!loadMore) {
+        conversationSessions = []; // 初回ロード時はローカルセッションをクリア
+        console.log("Initial load: Cleared local conversationSessions.");
+    }
+
+    if (querySnapshot.empty) {
+      console.log("Firestoreから取得したセッションがありません。");
+      allHistoryLoaded = true;
+    } else {
+      console.log(`Firestoreから ${querySnapshot.docs.length} 件のセッションを取得しました。`);
+      querySnapshot.forEach(doc => {
+        let sessionData = doc.data();
+        // --- Timestamp 変換処理 ---
+        if (sessionData.createdAt && sessionData.createdAt.toDate) {
+            sessionData.createdAt = sessionData.createdAt.toDate();
         }
-        // ★ currentSession を再設定 (上書きや追加で参照が変わる可能性があるため) ★
-        currentSession = conversationSessions.find(s => s.id === currentSession.id);
-    }
-    // ★ 追加ここまで ★
+        if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
+            sessionData.updatedAt = sessionData.updatedAt.toDate();
+        }
+        if (sessionData.messages && Array.isArray(sessionData.messages)) {
+            sessionData.messages = sessionData.messages.map(msg => {
+                const localMsg = { ...msg };
+                if (localMsg.timestamp && localMsg.timestamp.toDate) {
+                    localMsg.timestamp = localMsg.timestamp.toDate();
+                }
+                return localMsg;
+            });
+        }
+        // --- 変換処理ここまで ---
+        // 重複を避けるために、既存のセッションがあれば更新、なければ追加
+        const existingIndex = conversationSessions.findIndex(s => s.id === sessionData.id);
+        if (existingIndex > -1) {
+            conversationSessions[existingIndex] = sessionData;
+        } else {
+            conversationSessions.push(sessionData);
+        }
+      });
 
-    updateSideMenu(); // 削除モードの状態に関わらず更新
-
-    /* 不要になった処理 (currentSession の再検索は上記で行う)
-    if (currentSession) {
-      const fresh = conversationSessions.find(s => s.id === currentSession.id);
-      if (fresh) {
-        currentSession = fresh;
+      lastVisibleDocFromFirestore = querySnapshot.docs[querySnapshot.docs.length - 1];
+      
+      if (querySnapshot.docs.length < (loadMore ? LOAD_MORE_COUNT : INITIAL_LOAD_COUNT)) {
+        console.log("取得件数がリミットより少ないため、全履歴読み込み完了とします。");
+        allHistoryLoaded = true;
       }
     }
-    */
+
+    // ★ currentSession のデータをローカルの conversationSessions 配列と同期 ★
+    if (currentSession) {
+      const freshCurrentSession = conversationSessions.find(s => s.id === currentSession.id);
+      if (freshCurrentSession) {
+        currentSession = freshCurrentSession;
+      } else {
+        // currentSession が読み込まれたデータセットにない場合 (例: ページネーションの範囲外だがまだアクティブな場合)
+        // currentSession を conversationSessions の先頭に追加する (表示のため)
+        // ただし、currentSession の実体は別途 Firestore から取得・更新されているべき
+        // ここでは、もしリストになければ表示のために一時的に追加する。
+        // 理想的には、currentSession は常に最新状態で別途管理される。
+        // しかし、この関数は conversationSessions を Firestore からのデータで「更新」する役割なので、
+        // currentSession が古いデータセットに含まれていなければ、それはそれで正しい。
+        // updateSideMenu が currentSession を特別扱いして表示する。
+        console.log("Current session was not in the newly loaded batch from Firestore.");
+      }
+    }
+    
   } catch (error) {
-    console.error("サイドメニュー更新エラー:", error);
+    console.error("サイドメニュー更新エラー (Firestoreからの取得):", error);
+  } finally {
+    updateSideMenu(); // 取得データでUIを更新
+    showThinkingIndicator(false); // ★ インジケーター非表示 ★
   }
 }
 
 function updateSideMenu() {
-  console.log("updateSideMenu called, deleteMode=", isDeleteMode); // 削除モードの状態をログ出力
+  console.log("updateSideMenu called, deleteMode=", isDeleteMode);
   const historyDiv = document.getElementById('conversation-history');
-  historyDiv.innerHTML = "";
+  historyDiv.innerHTML = ""; // クリア
 
-  // 削除モードに応じてクラスをトグル
   if (isDeleteMode) {
     historyDiv.classList.add('delete-mode');
   } else {
     historyDiv.classList.remove('delete-mode');
   }
 
-  const activeSessions = currentSession ? [currentSession] : [];
+  // conversationSessions を updatedAt で降順ソート (表示前に必ずソート)
+  // currentSession は特別扱いするため、ここではソート対象から一旦外すか、
+  // currentSession の updatedAt が最新ならソート後も先頭に来るはず。
+  // ただし、表示上 currentSession を先頭に持ってくる処理があるので、
+  // ここでのソートは finishedSessions のみに適用しても良い。
+  
+  let sessionsToDisplay = [...conversationSessions];
+  
+  // currentSession があれば、それをリストの先頭に持ってくる (もし配列内にあれば一度削除してから先頭に追加)
+  if (currentSession) {
+      const currentIndex = sessionsToDisplay.findIndex(s => s.id === currentSession.id);
+      if (currentIndex > -1) {
+          sessionsToDisplay.splice(currentIndex, 1); // 配列から一度削除
+      }
+      // currentSession の実体は最新であるべきなので、conversationSessions から見つからなくても currentSession 自身を使う
+      // ただし、表示のためには title などが必要
+      if (currentSession.title) { // title があれば表示対象として先頭に追加
+          sessionsToDisplay.unshift(currentSession);
+      }
+  }
+  
+  // 重複排除 (IDベースで)
+  sessionsToDisplay = sessionsToDisplay.filter((session, index, self) =>
+      index === self.findIndex((s) => (
+          s.id === session.id
+      ))
+  );
 
-  const finishedSessions = conversationSessions.filter(s => s.id !== currentSession?.id);
+  // updatedAt で降順ソート (currentSession を先頭に置いた後で再度ソート)
+  // ただし、currentSession を除いた部分をソートするのが良いか。
+  // ここでは、currentSession を先頭に固定し、残りをソートする。
+  let finishedSessionsForDisplay = sessionsToDisplay.filter(s => !currentSession || s.id !== currentSession.id);
+  finishedSessionsForDisplay.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-  const finishedSessionsFiltered = finishedSessions.filter(s => {
-    const isEmpty = !s.messages || s.messages.length === 0;
-    const isUntitled = s.title === "無題";
-    return !(isEmpty && isUntitled);
+  let finalSortedSessions = [];
+  if (currentSession && currentSession.title) {
+      finalSortedSessions.push(currentSession);
+  }
+  finalSortedSessions = finalSortedSessions.concat(finishedSessionsForDisplay);
+  
+  // 無題かつメッセージ空のセッションを除外 (currentSession は除く)
+  finalSortedSessions = finalSortedSessions.filter(session => {
+      if (currentSession && session.id === currentSession.id) return true; // currentSession は常に表示
+      const isEmpty = !session.messages || session.messages.length === 0;
+      const isUntitled = session.title === "無題";
+      return !(isEmpty && isUntitled);
   });
 
-  activeSessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  finishedSessionsFiltered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-  const sortedSessions = [...activeSessions, ...finishedSessionsFiltered];
-
-  sortedSessions.forEach(session => {
+  finalSortedSessions.forEach(session => {
     const link = document.createElement('a');
     link.href = "#";
-    link.innerText = session.title;
-    link.style.display = "block"; // block のまま
-    link.style.position = "relative"; // アイコンのposition:absolute用
+    link.innerText = session.title || "無題"; // title が undefined の場合のフォールバック
+    link.style.display = "block";
+    link.style.position = "relative";
     link.style.marginBottom = "5px";
-    // link.style.paddingTop = "5px"; // CSSで管理するため削除
-    // link.style.paddingLeft = "5px"; // CSSで管理するため削除
-    link.style.padding = "5px 10px"; // 左右に少しパディングを追加
+    link.style.padding = "5px 10px";
     link.style.textDecoration = "none";
-    link.style.color = "#FFFFFF"; // CSSで管理するため削除 (CSS側で!importantがあれば不要)
+    link.style.color = session.id === currentSession?.id ? "#87CEFA" : "#FFFFFF"; // アクティブなセッションを強調
     if (session.id === currentSession?.id) {
-      link.style.fontWeight = "bold"; // CSSで管理するため削除 (CSS側で管理推奨)
+      link.style.fontWeight = "bold";
     }
 
-    // 削除モードでない場合のみ、セッション読み込みのイベントリスナーを追加
     if (!isDeleteMode) {
-        link.addEventListener('click', e => {
-            e.preventDefault();
-            loadSessionById(session.id);
-            toggleSideMenu();
-        });
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        // conversationSessions に対象セッションがなければロードする処理は未実装
+        // 現状はメモリ上の conversationSessions から探す
+        loadSessionById(session.id); 
+        toggleSideMenu(); // メニューを閉じる
+      });
     }
 
-    // 削除モードの場合、ゴミ箱アイコンを追加
     if (isDeleteMode) {
       const deleteIcon = document.createElement('i');
       deleteIcon.classList.add('bi', 'bi-trash', 'delete-thread-icon');
       deleteIcon.addEventListener('click', (e) => {
+        console.log(`Delete icon clicked for session: ${session.id}`);
         e.preventDefault();
-        e.stopPropagation(); // リンクのクリックイベント発火を防ぐ
+        e.stopPropagation();
         deleteSessionById(session.id);
       });
       link.appendChild(deleteIcon);
     }
-
     historyDiv.appendChild(link);
   });
+
+  // 「続けて5件見る」ボタンの追加
+  if (!allHistoryLoaded && conversationSessions.length > 0) { // 会話履歴が1件以上あり、全件ロードされていなければ表示
+    const loadMoreButton = document.createElement('button');
+    loadMoreButton.innerText = "続けて5件見る";
+    loadMoreButton.classList.add('load-more-btn'); // CSSでスタイルを調整するためクラス追加
+    loadMoreButton.addEventListener('click', () => {
+      console.log("「続けて5件見る」ボタンがクリックされました。");
+      updateSideMenuFromFirebase(true); // true を渡して追加読み込み
+    });
+    historyDiv.appendChild(loadMoreButton);
+  } else if (allHistoryLoaded && conversationSessions.length > 0) {
+    const noMoreHistory = document.createElement('p');
+    noMoreHistory.innerText = "これ以上履歴はありません";
+    noMoreHistory.classList.add('no-more-history'); // CSS用
+    historyDiv.appendChild(noMoreHistory);
+  }
 }
 
 function loadSessionById(id) {
@@ -589,64 +677,67 @@ function loadSessionById(id) {
 
 async function startNewChat() {
   console.log("startNewChat called");
-  // ★ 連打防止チェック
   if (isCreatingNewSession) {
     console.log("Already creating a new session, ignoring click.");
     return;
   }
-  isCreatingNewSession = true; // フラグを立てる
-  showThinkingIndicator(true); // インジケーター表示
+  isCreatingNewSession = true;
+  showThinkingIndicator(true);
 
   try {
-    const activeEmptySession = conversationSessions.find(
-      s => s.sessionState === "active" && (!s.messages || s.messages.length === 0)
-    );
+    // 空のアクティブセッションの再利用ロジックは createNewSession に統合、または 여기서 currentSession を設定後に updateSideMenuFromFirebase を呼ぶ
+    // 現状では createNewSession が呼ばれた後に updateSideMenuFromFirebase(false) を呼ぶ方が整理される
 
-    if (activeEmptySession) {
-      console.log("既存の空のアクティブセッションを再利用します:", activeEmptySession.id);
-      currentSession = activeEmptySession;
-      document.getElementById('chatMessages').innerHTML = "";
-      lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
-      scrollToBottom();
-      // ★ フラグを下ろす処理が抜けていた可能性 ★
-      // showThinkingIndicator(false); // ここではない
-      // isCreatingNewSession = false;
-      return; // 再利用なのでここで終了
-    }
-
-    // 既存のアクティブセッションがあれば終了させる
     if (currentSession && currentSession.sessionState === "active") {
       await endCurrentSession();
     }
+    
+    await createNewSession(); // この中で currentSession が設定される
 
-    // 新規セッションを作成
-    await createNewSession(); // この中で chatMessages クリアと lastHeaderDate リセットが行われる
+    // 新しいセッションが作成されたので、サイドメニューの履歴を初回ロード
+    // createNewSession の中で currentSession が設定された後が良い
+    // ただし、createNewSession は Promise を返すので、その完了後に実行
+    // await をつけたので、この行は createNewSession 完了後に実行される
+    console.log("New session created/reused, performing initial load for side menu.");
+    await updateSideMenuFromFirebase(false); // ★ createNewSession の後で呼び出し ★
 
   } catch (error) {
     console.error("Error starting new chat:", error);
-    // エラーメッセージをユーザーに表示する処理を追加しても良い
   } finally {
-    showThinkingIndicator(false); // インジケーター非表示
-    isCreatingNewSession = false; // フラグを下ろす
+    showThinkingIndicator(false);
+    isCreatingNewSession = false;
   }
 }
 
-// createNewSession でも念のためリセット
-function createNewSession() {
+async function createNewSession() {
     const currentUser = firebase.auth().currentUser;
     if (!currentUser) {
         console.error("ユーザーがログインしていません。セッションを作成できません。");
-        return Promise.reject(new Error("User not logged in")); // ★ Promise を返すように変更 ★
+        return Promise.reject(new Error("User not logged in"));
     }
 
-    // 既存の空アクティブセッションチェックは startNewChat で行うので不要
-    /*
-    if (currentSession && currentSession.sessionState === "active" && (!currentSession.messages || currentSession.messages.length === 0)) {
-        console.log("既存の空のアクティブセッションを再利用します。");
-        return Promise.resolve(); // ★ Promise を返す ★
-    }
-    */
+    // 既存の空でアクティブなセッションを探す
+    const existingEmptySession = conversationSessions.find(
+        s => s.userId === currentUser.uid && // 念のため自分のセッションか確認
+             s.sessionState === "active" && 
+             (!s.messages || s.messages.length === 0)
+    );
 
+    if (existingEmptySession) {
+        console.log("既存の空のアクティブセッションを再利用します:", existingEmptySession.id);
+        currentSession = existingEmptySession;
+        currentSession.updatedAt = new Date(); // 更新日時を更新
+        document.getElementById('chatMessages').innerHTML = "";
+        lastHeaderDate = null;
+        scrollToBottom();
+        // updateSideMenu(); // ここでは呼ばず、startNewChat 側で updateSideMenuFromFirebase を呼ぶ
+        // Firestoreへの書き込みも必要なら行う (updatedAtの更新など)
+        // この再利用ロジックは startNewChat に移した方が良いかもしれない
+        // ここで currentSession を設定し、startNewChat の最後で updateSideMenuFromFirebase(false) を呼ぶ
+        return Promise.resolve(); // これで currentSession が設定される
+    }
+
+    console.log("Creating a new session document in Firestore.");
     const now = new Date();
     const firestoreTimestampNow = firebase.firestore.Timestamp.fromDate(now);
     const sessionId = Date.now().toString(36) + "-" + Math.random().toString(36).substring(2);
@@ -659,25 +750,35 @@ function createNewSession() {
         sessionState: "active",
         userId: currentUser.uid
     };
-    const localSession = { ...sessionDataToSave }; // Firestore Timestamp を Date に戻す必要がある
+    
+    const localSession = { ...sessionDataToSave };
     localSession.createdAt = now;
     localSession.updatedAt = now;
 
-    conversationSessions.push(localSession);
-    currentSession = localSession;
-    document.getElementById('chatMessages').innerHTML = "";
-    lastHeaderDate = null; // ★ lastHeaderDate をリセット ★
-    scrollToBottom(); // スクロールも忘れずに
+    // conversationSessions に追加する前に currentSession を設定
+    currentSession = localSession; 
+    
+    // conversationSessions にも追加 (updateSideMenuFromFirebase でクリアされるが、一時的に保持)
+    // この追加は updateSideMenuFromFirebase で Firestore から取得したものと重複する可能性があるが、
+    // updateSideMenu の重複排除ロジックで対応される想定。
+    // もしくは、createNewSession の時点では conversationSessions に追加せず、
+    // updateSideMenuFromFirebase で Firestore から取得されたものが conversationSessions に入るのを待つ。
+    // currentSession だけ設定しておけば、updateSideMenu が特別扱いしてくれる。
+    // conversationSessions.push(localSession); // 一旦コメントアウト
 
-    // ★ Firestoreへの書き込みを非同期で行い、Promise を返す ★
-    return db.collection("chatSessions").doc(sessionId).set(sessionDataToSave).then(() => {
+    document.getElementById('chatMessages').innerHTML = "";
+    lastHeaderDate = null;
+    scrollToBottom();
+
+    try {
+        await db.collection("chatSessions").doc(sessionId).set(sessionDataToSave);
         console.log("新規セッションをFirestoreに作成 (/chatSessions):", sessionId);
-        updateSideMenu();
-    }).catch(error => {
+        // updateSideMenu(); // ここでは呼ばず、startNewChat 側で updateSideMenuFromFirebase を呼ぶ
+    } catch (error) {
         console.error("新規セッションのFirestore書き込みエラー:", error);
-        // エラーを呼び出し元に伝える
+        currentSession = null; // 作成失敗時は currentSession を戻すかクリア
         throw error;
-    });
+    }
 }
 
 // ===== API呼び出し関数 (Model Switcher のみ) =====
@@ -1181,44 +1282,41 @@ async function restoreFromFirebase() {
     console.error("ユーザーがログインしていません。リストアできません。");
     return;
   }
-  console.log("Current User UID:", currentUser.uid);
+  console.log("restoreFromFirebase called. Current User UID:", currentUser.uid);
+  
+  showThinkingIndicator(true); // ★ ロード中にインジケーター表示 ★
+  document.getElementById('chatMessages').innerHTML = ""; // チャット表示をクリア
+  currentSession = null; // カレントセッションをクリア
+  lastHeaderDate = null; // 日付ヘッダーもリセット
 
+  // conversationSessions は updateSideMenuFromFirebase でクリア＆設定されるのでここでは何もしない
+  
   try {
-    console.log("restoreFromFirebase called");
-    const querySnapshot = await db.collection("chatSessions")
-                                  .where("userId", "==", currentUser.uid)
-                                  .get();
-    conversationSessions = [];
-    querySnapshot.forEach(doc => {
-      let sessionData = doc.data();
-      // --- Timestamp 変換処理を追加 ---
-      if (sessionData.createdAt && sessionData.createdAt.toDate) {
-          sessionData.createdAt = sessionData.createdAt.toDate();
-      }
-      if (sessionData.updatedAt && sessionData.updatedAt.toDate) {
-          sessionData.updatedAt = sessionData.updatedAt.toDate();
-      }
-      if (sessionData.messages && Array.isArray(sessionData.messages)) {
-          sessionData.messages = sessionData.messages.map(msg => {
-              const localMsg = { ...msg };
-              if (localMsg.timestamp && localMsg.timestamp.toDate) {
-                  localMsg.timestamp = localMsg.timestamp.toDate();
-              }
-              // sources は Firestore に保存していないので、何もしない
-              return localMsg;
-          });
-      }
-      // --- 変換処理ここまで ---
-      conversationSessions.push(sessionData);
-    });
-    document.getElementById('chatMessages').innerHTML = "";
-    currentSession = null;
-    updateSideMenu();
-    console.log("リストア完了 (/chatSessions)");
+    // ★ updateSideMenuFromFirebase を呼び出して初回ロードを行う ★
+    await updateSideMenuFromFirebase(false); 
+    console.log("リストア完了 (Firestoreからの初回読み込み完了)");
+
+    // 必要であれば、最も新しいセッションを currentSession に設定するなどのロジック
+    if (conversationSessions.length > 0) {
+        // updatedAt でソートされている前提 (updateSideMenuFromFirebase でソートされる)
+        // もし自動で最新を開かない仕様なら、currentSession は null のままか、特定の条件で設定
+        // currentSession = conversationSessions[0]; // 例: 最新を自動で開く場合
+        // loadSessionById(conversationSessions[0].id);
+        console.log("セッションリストア後、currentSession は自動的には設定されません。必要に応じて手動でロードしてください。");
+    } else {
+        console.log("リストアするセッションがありませんでした。");
+        // 必要ならここで createNewSession を呼ぶ
+        // await createNewSession();
+        // await updateSideMenuFromFirebase(false); 
+    }
+
   } catch (error) {
     console.error("リストアエラー:", error);
     if (error.code) { console.error(`Firestore Error Code: ${error.code}`); }
     if (error.message) { console.error(`Firestore Error Message: ${error.message}`); }
+  } finally {
+    showThinkingIndicator(false); // ★ インジケーター非表示 ★
+    // updateSideMenu(); // updateSideMenuFromFirebase の finally で呼ばれるので不要
   }
 }
 

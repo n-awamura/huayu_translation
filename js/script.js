@@ -1060,6 +1060,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // const deleteToggle = document.getElementById('delete-thread-mode-btn'); // 削除
     const logoutLink = document.getElementById('logout-link');
     const micBtn = document.getElementById('micBtn');
+    const weatherBtn = document.getElementById('weatherBtn'); // ★ 天気ボタン取得 ★
     // const weatherBtn = document.getElementById('weather-btn'); // ★ 天気ボタン取得をコメントアウト ★
 
     if (sendButton) sendButton.addEventListener('click', onSendButton);
@@ -1104,6 +1105,11 @@ document.addEventListener('DOMContentLoaded', () => {
         micBtn.addEventListener('click', toggleRecording);
     } else {
         console.warn("Mic button (#micBtn) not found.");
+    }
+    if (weatherBtn) { // ★ 天気ボタンのリスナー設定 ★
+        weatherBtn.addEventListener('click', getTaiwanWeatherForecast);
+    } else {
+        console.warn("Weather button (#weatherBtn) not found.");
     }
 
     // ★★★ 天気ボタンのリスナー設定をコメントアウト ★★★
@@ -1458,4 +1464,93 @@ function setAppHeight() {
   const doc = document.documentElement;
   doc.style.setProperty('--app-height', `${window.innerHeight}px`);
   console.log(`App height set to: ${window.innerHeight}px`); // デバッグ用ログ
+}
+
+// ===== 台湾の天気予報を取得・表示する関数 =====
+async function getTaiwanWeatherForecast() {
+  console.log("getTaiwanWeatherForecast called");
+
+  // 「考え中だゾウ...」メッセージ表示の準備 (callGeminiから引用・調整)
+  const chatMessagesDiv = document.getElementById('chatMessages');
+  const delayTime = 500; // 少し短めに設定
+  let loadingRow = null;
+  let loadingTextElement = null;
+
+  const thinkingTimeoutId = setTimeout(() => {
+    loadingRow = document.createElement('div');
+    loadingRow.classList.add('message-row', 'other', 'thinking-row');
+
+    const icon = document.createElement('img');
+    icon.classList.add('icon');
+    icon.src = 'img/elephant.png';
+    icon.alt = '相手アイコン';
+    loadingRow.appendChild(icon);
+
+    const bubble = document.createElement('div');
+    bubble.classList.add('bubble');
+
+    loadingTextElement = document.createElement('div');
+    loadingTextElement.classList.add('bubble-text', 'blinking-text'); // 点滅クラスも追加
+    loadingTextElement.innerHTML = "<div class='temp-thinking-message'>今日の天気を調べてるゾウ...</div>"; 
+    bubble.appendChild(loadingTextElement);
+
+    const bubbleTime = document.createElement('div');
+    bubbleTime.classList.add('bubble-time');
+    const nowTime = new Date();
+    const hours = nowTime.getHours().toString().padStart(2, '0');
+    const minutes = nowTime.getMinutes().toString().padStart(2, '0');
+    bubbleTime.innerText = `${hours}:${minutes}`;
+    bubble.appendChild(bubbleTime);
+
+    loadingRow.appendChild(bubble);
+    chatMessagesDiv.appendChild(loadingRow);
+    scrollToBottom();
+    console.log("Displayed '天気を調べてるゾウ...' message (delayed).");
+  }, delayTime);
+
+  const weatherPrompt = "あなたは親しみやすいゾウのキャラクターの気象予報士で、語尾は'だゾウ'です。台湾の主要都市（台北、台中、台南、高雄、花蓮など）の今日の天気予報（天気、最高気温、最低気温）、湿度を教えてください。可能であれば降水確率も教えてほしいだゾウ。ゾウのキャラクターであることや気象予報士であるという設定については、応答に一切含めないでください。";
+
+  try {
+    // ユーザー入力として空の文字列を渡し、チャット履歴には残さない形で呼び出し
+    const result = await callGeminiModelSwitcher(weatherPrompt, 'gemini-2.5-flash-preview-04-17');
+    clearTimeout(thinkingTimeoutId); 
+
+    if (loadingRow && loadingRow.parentElement) { 
+      console.log("Replacing '天気を調べてるゾウ...' message with actual weather forecast.");
+      const newRowContainer = document.createElement('div'); 
+      addMessageRowToElement(newRowContainer, result.answer, 'other', new Date(), result.sources);
+      if (newRowContainer.firstChild) {
+        loadingRow.replaceWith(newRowContainer.firstChild);
+      } else {
+        console.error("Failed to create new message row for weather replacement. Removing thinking row.");
+        loadingRow.remove(); 
+        addMessageRow(result.answer || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources); 
+      }
+    } else { 
+      console.log("Weather response received before '天気を調べてるゾウ...' timeout. Adding as new message.");
+      if (result && result.answer) {
+        addMessageRow(result.answer, 'other', new Date(), result.sources);
+      } else {
+        addMessageRow("天気予報がありませんでしただゾウ。", 'other');
+        console.error("Weather forecast result was empty or invalid:", result);
+      }
+    }
+  } catch (error) {
+    console.error("Error getting weather forecast:", error);
+    clearTimeout(thinkingTimeoutId);
+    if (loadingRow && loadingRow.parentElement) {
+      const bubbleTextDiv = loadingRow.querySelector('.bubble-text.blinking-text');
+      if (bubbleTextDiv) {
+        bubbleTextDiv.classList.remove('blinking-text');
+        bubbleTextDiv.innerHTML = `<div class='temp-thinking-message error-message'>天気予報の取得中にエラーが発生しました: ${escapeHtml(error.message)} だゾウ</div>`;
+      } else {
+        loadingRow.remove();
+        addMessageRow(`天気予報の取得中にエラーが発生しました: ${error.message}`, 'other');
+      }
+    } else {
+      addMessageRow(`天気予報の取得中にエラーが発生しました: ${error.message}`, 'other');
+    }
+  } finally {
+    scrollToBottom();
+  }
 }

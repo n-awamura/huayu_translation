@@ -91,30 +91,60 @@ html {
   cursor: pointer;
 }
 
-/* 既存アイコン (i タグ) と天気ボタン (button タグ) の共通スタイル */
-#main-header .header-controls .new-chat,
-#main-header .header-controls .hamburger,
-#main-header .header-controls #weather-btn {
+/* ヘッダーコントロール内のアイコン/ボタンの共通ベーススタイル */
+#main-header .header-controls .control-btn {
   cursor: pointer;
   font-size: 1.3rem;
-  color: var(--header-text-color); /* Use new text color */
+  color: var(--header-text-color);
+  vertical-align: middle;
+  background: none; /* ボタン要素のためにデフォルトで透明に */
+  border: none;     /* ボタン要素のためにデフォルトで枠線なしに */
+  padding: 5px;     /* クリック領域のためのパディング */
+  margin: 0 2px;    /* ボタン間の最小マージン */
+}
+
+/* i要素であるハンバーガーメニューの微調整 (もしcontrol-btnクラスを適用する場合) */
+#main-header .header-controls .hamburger {
+  /* padding: 5px; */ /* control-btnから継承、または個別に設定 */
+}
+
+/* button要素である新規作成ボタンの微調整 */
+#main-header .header-controls .new-chat {
+  /* padding: 5px; */ /* control-btnから継承、または個別に設定 */
+}
+
+/* button要素である天気ボタンのスタイル */
+#main-header .header-controls #weatherBtn {
+  /* padding: 5px; */ /* control-btnから継承 */
+  /* 他のスタイルは control-btn から継承される想定 */
+}
+
+/* ホバーエフェクト (共通) */
+#main-header .header-controls .control-btn:hover {
+  opacity: 0.8;
+}
+
+/* 元のセレクタをコメントアウトまたは削除 */
+/*
+#main-header .header-controls .new-chat, 
+#main-header .header-controls .hamburger,
+#main-header .header-controls #weatherBtn { 
+  cursor: pointer;
+  font-size: 1.3rem;
+  color: var(--header-text-color); 
   vertical-align: middle; 
-}
-
-/* 天気ボタン固有のスタイル調整 */
-#main-header .header-controls #weather-btn {
   background: none; 
-  border: none; 
-  padding: 0; 
-  margin: 0; 
-  line-height: 1; 
+  border: none;     
+  padding: 5px;     
+  margin: 0 2px;    
 }
 
-#main-header .header-controls #weather-btn:hover,
+#main-header .header-controls #weatherBtn:hover, 
 #main-header .header-controls .new-chat:hover,
 #main-header .header-controls .hamburger:hover {
   opacity: 0.8; 
 }
+*/
 
 .dropdown-toggle {
   cursor: pointer;

@@ -65,22 +65,17 @@
     <div class="logo">
       <img id="elephantImg" src="img/elephant.png" alt="elephant" class="header-image">
       <div id="elephantBubble" class="speech-bubble"></div>
-      <span id="chatHeaderTitle" class="title">TRANSLATION</span>
+      <div class="title">TRANSLATION</div>
     </div>
-    <div class="header-controls" style="display: none;">
-      <!-- Model Selector Dropdown -->
+    <div class="header-controls">
       <!-- <select id="model-select">
-        <option value="gemini-1.5-pro" selected>ノーマル</option>
-        <option value="gemini-1.5-pro-tw">台湾華語</option>
+        <option value="gemini-1.5-pro-tw">🇹🇼 TW (1.5 Pro)</option>
+        <option value="gemini-1.5-pro" selected>💨 Normal (1.5 Pro)</option>
+        <option value="gemini-2.0-flash">⚡️ Flash (2.0)</option>
       </select> -->
-      <button class="new-chat" id="new-chat" title="新しいチャット">
-        <i class="bi bi-pencil-square"></i>
-      </button>
-      <!-- Weather Button (Add this between dropdown and hamburger) -->
-      <!-- <button id="weather-btn" class="icon-button" title="天気予報を表示">
-        <i class="bi bi-sun"></i>
-      </button> -->
-      <i class="bi bi-list hamburger" id="hamburger" title="Menu"></i>
+      <button id="weatherBtn" class="control-btn" title="天気予報"><i class="bi bi-sun"></i></button>
+      <button id="new-chat" class="control-btn" title="新規作成"><i class="bi bi-pencil-square"></i></button>
+      <i id="hamburger" class="bi bi-list control-btn" title="メニュー"></i>
     </div>
   </header>
 

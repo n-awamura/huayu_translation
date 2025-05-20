@@ -504,45 +504,46 @@ async function createNewSession() {
 
 // Gemini Model Switcher Workerを呼び出す関数 (デフォルトモデル名を 1.5-pro に変更)
 async function callGeminiModelSwitcher(prompt, modelName = 'gemini-1.5-pro', useGrounding = false, toolName = null, retryCount = 0) {
-    const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev"; 
+    const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
     const maxRetries = 2;
 
     try {
         let response;
-        let requestBody;
+        let requestBody = undefined; // GETの場合は undefined
         let requestUrl = workerUrl;
-        let requestMethod = 'POST';
-        let headers = { 'Content-Type': 'application/json' };
+        let requestMethod = 'POST'; // デフォルトはPOST
+        let headers = { 'Content-Type': 'application/json' }; // POSTの場合のみ
 
-        if (useGrounding && toolName) { 
+        if (useGrounding && toolName) {
             requestMethod = 'GET';
             const params = new URLSearchParams({
-                q: prompt,
+                q: prompt, // old.js に合わせて 'q' を使用
                 model: modelName,
-                tool: toolName 
+                tool: toolName
             });
             requestUrl = `${workerUrl}?${params.toString()}`;
-            console.log(`[DEBUG] Grounding Request - URL: ${requestUrl}`);
-            headers = {};
-            requestBody = undefined;
+            headers = {}; // GETの場合はContent-Type不要
+            requestBody = undefined; // GETなのでボディはなし
+            console.log(`[DEBUG] Grounding enabled (GET) for Worker call: URL=${requestUrl}`);
         } else {
+            // グラウンディングなしの場合 (POST)
             requestMethod = 'POST';
-            // ★ Workerに渡すモデル名を引数で受け取ったものに固定 ★
-            requestBody = JSON.stringify({ prompt: prompt, modelName: modelName }); 
-            console.log(`[DEBUG] Normal Request - URL: ${requestUrl}, Model: ${modelName}, Body: ${requestBody}`);
+            requestBody = JSON.stringify({ prompt: prompt, modelName: modelName });
+            headers = { 'Content-Type': 'application/json' };
+            console.log(`[DEBUG] Normal Request (POST) for Worker call: modelName=${modelName}`);
         }
 
-        console.log(`[DEBUG] Sending request to Worker:`, {
+        console.log(`[DEBUG] Sending request to Worker: `, {
              url: requestUrl,
              method: requestMethod,
              headers: headers,
-             body: (requestMethod === 'GET') ? '(GET request has no body)' : requestBody
+             body: requestBody // GETの場合は undefined
          });
 
         response = await fetch(requestUrl, {
             method: requestMethod,
             headers: headers,
-            body: requestBody
+            body: requestBody // fetch API は body が undefined でもOK
         });
 
         if (!response.ok) {
@@ -559,125 +560,114 @@ async function callGeminiModelSwitcher(prompt, modelName = 'gemini-1.5-pro', use
         const data = await response.json();
         console.log("[DEBUG] Received data from Worker:", JSON.stringify(data, null, 2));
 
-        if (data && data.answer !== undefined) {
-            return data;
+        if (data && data.answer !== undefined) { // Workerは 'answer' で返す前提
+            return { result: data.answer, sources: data.sources };
+        } else if (data && data.result !== undefined) { // Workerが 'result' で返す可能性も考慮（フォールバック）
+            console.warn("[DEBUG] Worker returned 'result' key instead of 'answer'. Using 'result'.");
+            return { result: data.result, sources: data.sources };
         } else {
-            console.error("Unexpected response format from worker (expected { answer: ..., sources?: ... }):", data);
-            throw new Error("Invalid response format from worker.");
+            console.error("Unexpected response format from worker. Expected 'answer' or 'result' field, but got:", data);
+            throw new Error("Invalid response format from worker: 'answer' or 'result' field missing.");
         }
 
     } catch (error) {
-        console.error(`Error calling Gemini Model Switcher (Attempt ${retryCount + 1}):`, error);
+        console.error(`Error calling Gemini Model Switcher (Attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message);
         if (retryCount < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-            return callGeminiModelSwitcher(prompt, modelName, useGrounding, toolName, retryCount + 1); 
+            return callGeminiModelSwitcher(prompt, modelName, useGrounding, toolName, retryCount + 1);
         } else {
-             throw error;
+            throw error;
         }
     }
 }
 
 async function callGeminiSummary(prompt, retryCount = 0) {
-  return await callGeminiModelSwitcher(prompt, 'gemini-1.5-flash', retryCount);
+  // 概要はグラウンディング不要、モデルは flash 系
+  return await callGeminiModelSwitcher(prompt, 'gemini-1.5-flash', false, null, retryCount);
 }
 
 // ===== メインの Gemini 呼び出し関数 =====
-async function callGemini(userInput) { // thinkingBubbleId パラメータを削除
-    // showThinkingIndicator(true); // ヘッダーの吹き出し操作は削除
+async function callGemini(userInput) {
     console.log("callGemini called with input:", userInput);
 
-    // old.js を参考に「考え中」メッセージの遅延表示ロジックを追加
     const chatMessagesDiv = document.getElementById('chatMessages');
-    const delayTime = 3000; 
-    let loadingRow = null; // 関数スコープの変数として宣言
-    let loadingTextElement = null; // bubble-text 要素を保持
-
-    const thinkingTimeoutId = setTimeout(() => {
-        loadingRow = document.createElement('div');
-        loadingRow.classList.add('message-row', 'other', 'thinking-row'); // thinking-row クラスを追加 (識別用)
-
-        const icon = document.createElement('img');
-        icon.classList.add('icon');
-        icon.src = 'img/elephant.png';
-        icon.alt = '相手アイコン';
-        loadingRow.appendChild(icon);
-
-        const bubble = document.createElement('div');
-        bubble.classList.add('bubble');
-
-        loadingTextElement = document.createElement('div');
-        loadingTextElement.classList.add('bubble-text');
-        loadingTextElement.innerHTML = "<div class='temp-thinking-message'>考え中だゾウ...</div>"; // isThinkingフラグがなくなったため、直接HTMLを設定
-        loadingTextElement.classList.add('blinking-text'); // 点滅クラスを追加
-        bubble.appendChild(loadingTextElement);
-
-        // タイムスタンプも「考え中」メッセージに追加（API応答後に更新される）
-        const bubbleTime = document.createElement('div');
-        bubbleTime.classList.add('bubble-time');
-        const nowTime = new Date();
-        const hours = nowTime.getHours().toString().padStart(2, '0');
-        const minutes = nowTime.getMinutes().toString().padStart(2, '0');
-        bubbleTime.innerText = `${hours}:${minutes}`;
-        bubble.appendChild(bubbleTime);
-
-        loadingRow.appendChild(bubble);
-        chatMessagesDiv.appendChild(loadingRow);
-        scrollToBottom();
-        console.log("Displayed '考え中だゾウ...' message (delayed).");
-    }, delayTime);
-
-
-    // プロンプトを調整
-    const characterPrompt = "あなたは親しみやすいゾウのキャラクターです。応答の語尾はすべて「だゾウ」で終えるようにしてください。キャラクター設定に関する言及は、応答に一切含めないでください。";
-    const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。
-その際、以下の点に注意して回答を生成してください。
-1. 主な翻訳をまず提示する。
-2. 次に、同じ意味合いで使える別の言い回しや類義表現を1～2個提示する。
-3. 最後に、提示した翻訳や言い回しについて、簡単な文法解説やニュアンスの違い、使われる場面などを補足説明する。`;
-    const combinedPrompt = `${characterPrompt}
-
-上記のキャラクター設定および以下の指示に従って、ユーザーの入力を翻訳・解説してください。
-
-${translationRequest}`;
-
-    console.log("Combined Prompt (sending to worker):", combinedPrompt);
-
-    // thinkingBubbleId に関連する処理を削除
-    // const thinkingBubbleContentElement = document.getElementById(thinkingBubbleId);
+    const delayTime = 3000;
+    let loadingRow = null;
+    let loadingTextElement = null;
+    let thinkingTimeoutId = null;
 
     try {
-        const result = await callGeminiModelSwitcher(combinedPrompt, 'gemini-2.5-flash-preview-04-17');
-        clearTimeout(thinkingTimeoutId); // API応答が来たらタイマーを解除
+        thinkingTimeoutId = setTimeout(() => {
+            loadingRow = document.createElement('div');
+            loadingRow.classList.add('message-row', 'other', 'thinking-row');
+            const icon = document.createElement('img');
+            icon.classList.add('icon');
+            icon.src = 'img/elephant.png';
+            icon.alt = '相手アイコン';
+            loadingRow.appendChild(icon);
+            const bubble = document.createElement('div');
+            bubble.classList.add('bubble');
+            loadingTextElement = document.createElement('div');
+            loadingTextElement.classList.add('bubble-text', 'blinking-text');
+            loadingTextElement.innerHTML = "<div class='temp-thinking-message'>考え中だゾウ...</div>";
+            bubble.appendChild(loadingTextElement);
+            const bubbleTime = document.createElement('div');
+            bubbleTime.classList.add('bubble-time');
+            const nowTime = new Date();
+            const hours = nowTime.getHours().toString().padStart(2, '0');
+            const minutes = nowTime.getMinutes().toString().padStart(2, '0');
+            bubbleTime.innerText = `${hours}:${minutes}`;
+            bubble.appendChild(bubbleTime);
+            loadingRow.appendChild(bubble);
+            chatMessagesDiv.appendChild(loadingRow);
+            scrollToBottom();
+            console.log("Displayed '考え中だゾウ...' message (delayed).");
+        }, delayTime);
 
-        if (loadingRow && loadingRow.parentElement) { // 「考え中」メッセージが表示されていた場合
+        const characterPrompt = "あなたは親しみやすいゾウのキャラクターです。応答の語尾はすべて「だゾウ」で終えるようにしてください。キャラクター設定に関する言及は、応答に一切含めないでください。";
+        const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。\nその際、以下の点に注意して回答を生成してください。\n1. 主な翻訳をまず提示する。\n2. 次に、同じ意味合いで使える別の言い回しや類義表現を1～2個提示する。\n3. 最後に、提示した翻訳や言い回しについて、簡単な文法解説やニュアンスの違い、使われる場面などを補足説明する。`;
+        const combinedPrompt = `${characterPrompt}\n\n上記のキャラクター設定および以下の指示に従って、ユーザーの入力を翻訳・解説してください。\n\n${translationRequest}`;
+
+        console.log("Combined Prompt (sending to worker for translation):", combinedPrompt);
+        // ★ 翻訳: モデル 'gemini-2.5-flash-preview-04-17', グラウンディングなし ★
+        const result = await callGeminiModelSwitcher(combinedPrompt, 'gemini-2.5-flash-preview-04-17', false, null);
+        
+        if (thinkingTimeoutId) {
+            clearTimeout(thinkingTimeoutId);
+            thinkingTimeoutId = null; 
+        }
+
+        if (loadingRow && loadingRow.parentElement) {
             console.log("Replacing '考え中だゾウ...' message with actual response.");
-            // addMessageRowToElement を使って新しい行を生成し、置き換える
-            const newRowContainer = document.createElement('div'); // ダミーの親要素
-            addMessageRowToElement(newRowContainer, result.answer, 'other', new Date(), result.sources);
+            const newRowContainer = document.createElement('div');
+            addMessageRowToElement(newRowContainer, result.result, 'other', new Date(), result.sources);
             if (newRowContainer.firstChild) {
                 loadingRow.replaceWith(newRowContainer.firstChild);
             } else {
                 console.error("Failed to create new message row for replacement. Removing thinking row.");
-                loadingRow.remove(); // 新しい行の作成に失敗したら、「考え中」行を削除
-                addMessageRow(result.answer || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources); // 通常通り追加
+                loadingRow.remove();
+                addMessageRow(result.result || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
             }
-        } else { // 「考え中」メッセージが表示される前に応答が来た場合
+        } else {
             console.log("Response received before '考え中だゾウ...' timeout. Adding as new message.");
-            if (result && result.answer) {
-                 addMessageRow(result.answer, 'other', new Date(), result.sources);
+            if (result && result.result) {
+                addMessageRow(result.result, 'other', new Date(), result.sources);
             } else {
-                 addMessageRow("翻訳結果がありませんでした。(No translation result) だゾウ", 'other');
-                 console.error("Translation result was empty or invalid:", result);
+                addMessageRow("翻訳結果がありませんでした。(No translation result) だゾウ", 'other');
+                console.error("Translation result was empty or invalid:", result);
             }
         }
     } catch (error) {
         console.error("Error calling Gemini for translation:", error);
-        clearTimeout(thinkingTimeoutId); // エラー時もタイマーを解除
+        if (thinkingTimeoutId) {
+            clearTimeout(thinkingTimeoutId);
+            thinkingTimeoutId = null;
+        }
+
         if (loadingRow && loadingRow.parentElement) {
-            // 「考え中」メッセージをエラーメッセージで更新する、または削除して新しいエラーメッセージ行を追加
-            const bubbleTextDiv = loadingRow.querySelector('.bubble-text.blinking-text'); // 点滅クラスも考慮
+            const bubbleTextDiv = loadingRow.querySelector('.bubble-text.blinking-text');
             if (bubbleTextDiv) {
-                bubbleTextDiv.classList.remove('blinking-text'); // 点滅を止める
+                bubbleTextDiv.classList.remove('blinking-text');
                 bubbleTextDiv.innerHTML = `<div class='temp-thinking-message error-message'>翻訳中にエラーが発生しました: ${escapeHtml(error.message)} だゾウ</div>`;
             } else {
                 loadingRow.remove();
@@ -687,8 +677,7 @@ ${translationRequest}`;
             addMessageRow(`翻訳中にエラーが発生しました: ${error.message}`, 'other');
         }
     } finally {
-        // showThinkingIndicator(false); // ヘッダーの吹き出し操作は削除
-        scrollToBottom(); // 応答表示後にスクロール
+        scrollToBottom();
     }
 }
 
@@ -1470,74 +1459,92 @@ function setAppHeight() {
 async function getTaiwanWeatherForecast() {
   console.log("getTaiwanWeatherForecast called");
 
-  // 「考え中だゾウ...」メッセージ表示の準備 (callGeminiから引用・調整)
   const chatMessagesDiv = document.getElementById('chatMessages');
-  const delayTime = 500; // 少し短めに設定
+  const delayTime = 500;
   let loadingRow = null;
   let loadingTextElement = null;
-
-  const thinkingTimeoutId = setTimeout(() => {
-    loadingRow = document.createElement('div');
-    loadingRow.classList.add('message-row', 'other', 'thinking-row');
-
-    const icon = document.createElement('img');
-    icon.classList.add('icon');
-    icon.src = 'img/elephant.png';
-    icon.alt = '相手アイコン';
-    loadingRow.appendChild(icon);
-
-    const bubble = document.createElement('div');
-    bubble.classList.add('bubble');
-
-    loadingTextElement = document.createElement('div');
-    loadingTextElement.classList.add('bubble-text', 'blinking-text'); // 点滅クラスも追加
-    loadingTextElement.innerHTML = "<div class='temp-thinking-message'>今日の天気を調べてるゾウ...</div>"; 
-    bubble.appendChild(loadingTextElement);
-
-    const bubbleTime = document.createElement('div');
-    bubbleTime.classList.add('bubble-time');
-    const nowTime = new Date();
-    const hours = nowTime.getHours().toString().padStart(2, '0');
-    const minutes = nowTime.getMinutes().toString().padStart(2, '0');
-    bubbleTime.innerText = `${hours}:${minutes}`;
-    bubble.appendChild(bubbleTime);
-
-    loadingRow.appendChild(bubble);
-    chatMessagesDiv.appendChild(loadingRow);
-    scrollToBottom();
-    console.log("Displayed '天気を調べてるゾウ...' message (delayed).");
-  }, delayTime);
-
-  const weatherPrompt = "あなたは親しみやすいゾウのキャラクターの気象予報士で、語尾は'だゾウ'です。台湾の主要都市（台北、台中、台南、高雄、花蓮など）の今日の天気予報（天気、最高気温、最低気温）、湿度を教えてください。可能であれば降水確率も教えてほしいだゾウ。ゾウのキャラクターであることや気象予報士であるという設定については、応答に一切含めないでください。";
+  let thinkingTimeoutId = null;
 
   try {
-    // ユーザー入力として空の文字列を渡し、チャット履歴には残さない形で呼び出し
-    const result = await callGeminiModelSwitcher(weatherPrompt, 'gemini-2.5-flash-preview-04-17');
-    clearTimeout(thinkingTimeoutId); 
+      thinkingTimeoutId = setTimeout(() => {
+        loadingRow = document.createElement('div');
+        loadingRow.classList.add('message-row', 'other', 'thinking-row');
+        const icon = document.createElement('img');
+        icon.classList.add('icon');
+        icon.src = 'img/elephant.png';
+        icon.alt = '相手アイコン';
+        loadingRow.appendChild(icon);
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
+        loadingTextElement = document.createElement('div');
+        loadingTextElement.classList.add('bubble-text', 'blinking-text');
+        loadingTextElement.innerHTML = "<div class='temp-thinking-message'>今日の天気を調べてるゾウ...</div>"; 
+        bubble.appendChild(loadingTextElement);
+        const bubbleTime = document.createElement('div');
+        bubbleTime.classList.add('bubble-time');
+        const nowTime = new Date();
+        const hours = nowTime.getHours().toString().padStart(2, '0');
+        const minutes = nowTime.getMinutes().toString().padStart(2, '0');
+        bubbleTime.innerText = `${hours}:${minutes}`;
+        bubble.appendChild(bubbleTime);
+        loadingRow.appendChild(bubble);
+        chatMessagesDiv.appendChild(loadingRow);
+        scrollToBottom();
+        console.log("Displayed '天気を調べてるゾウ...' message (delayed).");
+      }, delayTime);
 
-    if (loadingRow && loadingRow.parentElement) { 
-      console.log("Replacing '天気を調べてるゾウ...' message with actual weather forecast.");
-      const newRowContainer = document.createElement('div'); 
-      addMessageRowToElement(newRowContainer, result.answer, 'other', new Date(), result.sources);
-      if (newRowContainer.firstChild) {
-        loadingRow.replaceWith(newRowContainer.firstChild);
-      } else {
-        console.error("Failed to create new message row for weather replacement. Removing thinking row.");
-        loadingRow.remove(); 
-        addMessageRow(result.answer || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources); 
+      const now = new Date();
+      const currentHour = now.getHours();
+      let targetDateStr = "今日";
+      let forecastDate = new Date(now);
+
+      if (currentHour >= 21) {
+        targetDateStr = "明日";
+        forecastDate.setDate(now.getDate() + 1);
       }
-    } else { 
-      console.log("Weather response received before '天気を調べてるゾウ...' timeout. Adding as new message.");
-      if (result && result.answer) {
-        addMessageRow(result.answer, 'other', new Date(), result.sources);
-      } else {
-        addMessageRow("天気予報がありませんでしただゾウ。", 'other');
-        console.error("Weather forecast result was empty or invalid:", result);
+      
+      const year = forecastDate.getFullYear();
+      const month = forecastDate.getMonth() + 1;
+      const day = forecastDate.getDate();
+      const dateForPrompt = `${year}年${month}月${day}日`;
+
+      const weatherPrompt = `あなたは親しみやすいゾウのキャラクターの気象予報士です。**応答の語尾は必ず「だゾウ」で統一してください。** 台湾の主要都市（台北、台中、台南、高雄、花蓮など）の${targetDateStr}（${dateForPrompt}）の天気予報（天気、最高気温、最低気温）、湿度を教えてください。可能であれば降水確率も教えてほしいだゾウ。応答には必ず予報の日付（${dateForPrompt}）を含めてください。ゾウのキャラクターであることや気象予報士であるという設定については、応答文に一切含めないでください。架空の情報である旨の記述は絶対に含めないでください。**最後に「この情報は[検索実行日時]時点の情報を元にしているだゾウ！」という形式で、情報を取得した検索エンジンの検索実行日時を必ず含めてください。**`;
+      console.log("Weather prompt to send for weather forecast:", weatherPrompt);
+      // ★ 天気予報: モデル 'gemini-1.5-pro', グラウンディングあり ★
+      const result = await callGeminiModelSwitcher(weatherPrompt, 'gemini-1.5-pro', true, 'googleSearchRetrieval'); // toolName を修正
+
+      if (thinkingTimeoutId) {
+          clearTimeout(thinkingTimeoutId);
+          thinkingTimeoutId = null;
       }
-    }
+
+      if (loadingRow && loadingRow.parentElement) {
+          console.log("Replacing '天気を調べてるゾウ...' message with actual weather forecast.");
+          const newRowContainer = document.createElement('div');
+          addMessageRowToElement(newRowContainer, result.result, 'other', new Date(), result.sources);
+          if (newRowContainer.firstChild) {
+            loadingRow.replaceWith(newRowContainer.firstChild);
+          } else {
+            console.error("Failed to create new message row for weather replacement. Removing thinking row.");
+            loadingRow.remove();
+            addMessageRow(result.result || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
+          }
+      } else {
+          console.log("Weather response received before '天気を調べてるゾウ...' timeout. Adding as new message.");
+          if (result && result.result) {
+            addMessageRow(result.result, 'other', new Date(), result.sources);
+          } else {
+            addMessageRow("天気予報がありませんでしただゾウ。", 'other');
+            console.error("Weather forecast result was empty or invalid:", result);
+          }
+      }
   } catch (error) {
     console.error("Error getting weather forecast:", error);
-    clearTimeout(thinkingTimeoutId);
+    if (thinkingTimeoutId) {
+        clearTimeout(thinkingTimeoutId);
+        thinkingTimeoutId = null;
+    }
+
     if (loadingRow && loadingRow.parentElement) {
       const bubbleTextDiv = loadingRow.querySelector('.bubble-text.blinking-text');
       if (bubbleTextDiv) {

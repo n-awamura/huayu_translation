@@ -31,11 +31,20 @@
 }
 
 /* ===== ページ全体のベース設定 ===== */
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
+  height: 100%;
   margin: 0;
   padding: 0;
   background-color: var(--chat-bg-color); 
   font-family: var(--font-family-noto-sans-jp);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* ===== ヘッダー ===== */
@@ -47,6 +56,7 @@ body {
   align-items: center;
   padding: 0 10px;
   position: relative; 
+  flex-shrink: 0;
 }
 
 #main-header .logo {
@@ -282,13 +292,12 @@ body {
 
 /* ===== チャットコンテナ ===== */
 .chat-container {
-  max-width: 375px;
-  width: 100%;
-  height: calc(100vh - 50px); /* 50pxはヘッダーの高さ */
-  margin: 0 auto;
+  flex-grow: 1;
   display: flex;
   flex-direction: column;
-  background-color: var(--chat-bg-color); 
+  /* height: calc(100vh - 50px); */ /* 50pxはヘッダーの高さ */
+  background-color: var(--chat-bg-color);
+  overflow: hidden; /* コンテナ全体のオーバーフローを制御 */
 }
 
 /* ===== メッセージ一覧 ===== */

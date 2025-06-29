@@ -2,7 +2,6 @@
 // グローバル変数
 // ==============================
 // let conversationSessions = []; 
-// let currentSession = null;     
 let lastHeaderDate = null;   // ★ 最後にヘッダーを表示した日付 (Date オブジェクト)
 // let isDeleteMode = false; // 追加: 削除モードの状態
 let recognition = null; // 追加: SpeechRecognition インスタンス
@@ -503,72 +502,60 @@ async function createNewSession() {
 // async function callGeminiApi(...) { /* 削除 */ }
 
 // Gemini Model Switcher Workerを呼び出す関数 (デフォルトモデル名を 1.5-pro に変更)
-async function callGeminiModelSwitcher(prompt, modelName = 'gemini-1.5-pro', useGrounding = false, toolName = null, retryCount = 0) {
+async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.5-flash', useGrounding = false, toolName = null, retryCount = 0) {
     const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
     const maxRetries = 2;
 
     try {
         let response;
-        let requestBody = undefined; // GETの場合は undefined
-        let requestUrl = workerUrl;
-        let requestMethod = 'POST'; // デフォルトはPOST
-        let headers = { 'Content-Type': 'application/json' }; // POSTの場合のみ
-
-        if (useGrounding && toolName) {
-            requestMethod = 'GET';
+        if (useGrounding) {
+            // ★ グラウンディング時はGETリクエストを使用する ★
             const params = new URLSearchParams({
-                q: prompt, // old.js に合わせて 'q' を使用
-                model: modelName,
-                tool: toolName
+                q: prompt,
+                model: modelName
             });
-            requestUrl = `${workerUrl}?${params.toString()}`;
-            headers = {}; // GETの場合はContent-Type不要
-            requestBody = undefined; // GETなのでボディはなし
-            console.log(`[DEBUG] Grounding enabled (GET) for Worker call: URL=${requestUrl}`);
+            if (toolName) {
+                params.append('tool', toolName);
+            }
+            response = await fetch(`${workerUrl}?${params.toString()}`, {
+                method: 'GET'
+            });
+
         } else {
-            // グラウンディングなしの場合 (POST)
-            requestMethod = 'POST';
-            requestBody = JSON.stringify({ prompt: prompt, modelName: modelName });
-            headers = { 'Content-Type': 'application/json' };
-            console.log(`[DEBUG] Normal Request (POST) for Worker call: modelName=${modelName}`);
+            // ★ グラウンディングなしの場合はPOSTリクエスト ★
+            response = await fetch(workerUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    model: modelName
+                    // tool_name はPOSTでは使用されないので含めない
+                })
+            });
         }
 
-        console.log(`[DEBUG] Sending request to Worker: `, {
-             url: requestUrl,
-             method: requestMethod,
-             headers: headers,
-             body: requestBody // GETの場合は undefined
-         });
-
-        response = await fetch(requestUrl, {
-            method: requestMethod,
-            headers: headers,
-            body: requestBody // fetch API は body が undefined でもOK
-        });
-
         if (!response.ok) {
-             const errorText = await response.text();
-            console.error(`Worker Error (${response.status}): ${errorText}`);
-            let errorMessage = `Worker request failed with status ${response.status}`;
-            try {
-                const errorJson = JSON.parse(errorText);
-                if (errorJson.error) errorMessage += `: ${errorJson.error}`;
-            } catch (e) { /* ignore */ }
-            throw new Error(errorMessage);
+            const errorText = await response.text();
+            throw new Error(`Worker Error (${response.status}): ${errorText}`);
         }
 
         const data = await response.json();
-        console.log("[DEBUG] Received data from Worker:", JSON.stringify(data, null, 2));
-
-        if (data && data.answer !== undefined) { // Workerは 'answer' で返す前提
-            return { result: data.answer, sources: data.sources };
-        } else if (data && data.result !== undefined) { // Workerが 'result' で返す可能性も考慮（フォールバック）
-            console.warn("[DEBUG] Worker returned 'result' key instead of 'answer'. Using 'result'.");
-            return { result: data.result, sources: data.sources };
-        } else {
-            console.error("Unexpected response format from worker. Expected 'answer' or 'result' field, but got:", data);
-            throw new Error("Invalid response format from worker: 'answer' or 'result' field missing.");
+        // ★ Workerからの応答形式の揺れを吸収する ★
+        // GETとPOSTでWorkerからの応答形式が微妙に違う可能性があるため、より堅牢にする
+        // GET -> { answer, sources }, POST -> { answer }
+        if (data && data.hasOwnProperty('answer')) {
+            // 'answer'キーを持つオブジェクトを、'result'キーを持つ形式に統一
+            return {
+                result: { answer: data.answer },
+                sources: data.sources || []
+            };
         }
+        // 古い形式や予期せぬ形式へのフォールバック
+        if (data && typeof data === 'object' && data.hasOwnProperty('result')) {
+            return data;
+        }
+        return { result: { answer: data }, sources: [] };
+
 
     } catch (error) {
         console.error(`Error calling Gemini Model Switcher (Attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message);
@@ -581,13 +568,16 @@ async function callGeminiModelSwitcher(prompt, modelName = 'gemini-1.5-pro', use
     }
 }
 
+// 要約を叩く専用の関数
 async function callGeminiSummary(prompt, retryCount = 0) {
-  // 概要はグラウンディング不要、モデルは flash 系
-  return await callGeminiModelSwitcher(prompt, 'gemini-1.5-flash', false, null, retryCount);
+    // 概要はグラウンディング不要、モデルは flash 系
+    return await callGeminiModelSwitcher(prompt, 'gemini-2.5-flash', false, null, retryCount);
 }
 
 // ===== メインの Gemini 呼び出し関数 =====
 async function callGemini(userInput) {
+    const MAX_RETRIES = 2; // 最大リトライ回数
+    console.log(`callGemini called with userInput: "${userInput}"`);
     console.log("callGemini called with input:", userInput);
 
     const chatMessagesDiv = document.getElementById('chatMessages');
@@ -624,13 +614,15 @@ async function callGemini(userInput) {
             console.log("Displayed '考え中だゾウ...' message (delayed).");
         }, delayTime);
 
-        const characterPrompt = "あなたは親しみやすいゾウのキャラクターです。応答の語尾はすべて「だゾウ」で終えるようにしてください。キャラクター設定に関する言及は、応答に一切含めないでください。";
-        const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。\nその際、以下の点に注意して回答を生成してください。\n1. 主な翻訳をまず提示する。\n2. 次に、同じ意味合いで使える別の言い回しや類義表現を1～2個提示する。\n3. 最後に、提示した翻訳や言い回しについて、簡単な文法解説やニュアンスの違い、使われる場面などを補足説明する。`;
+        const characterPrompt = "あなたは非常に優秀な翻訳家で、親しみやすいゾウのキャラクターです。あなたの応答の語尾は、基本的にはすべて「だゾウ」で統一してください。ただし、文脈に応じて「〜ゾウ」のように、より自然な形で終わらせることも許可します（例：「いいですね」→「いいゾウ」）。キャラクター設定に関する言及は、応答に一切含めないでください。";
+        const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。\nその際、以下の点に注意して回答を生成してください。\n1. 主な翻訳をまず提示する。
+2. 次に、同じ意味合いで使える別の言い回しや類義表現を1～2個提示する。
+3. 最後に、提示した翻訳や言い回しについて、簡単な文法解説やニュアンスの違い、使われる場面などを補足説明する。`;
         const combinedPrompt = `${characterPrompt}\n\n上記のキャラクター設定および以下の指示に従って、ユーザーの入力を翻訳・解説してください。\n\n${translationRequest}`;
 
         console.log("Combined Prompt (sending to worker for translation):", combinedPrompt);
-        // ★ 翻訳: モデル 'gemini-2.5-flash-preview-04-17', グラウンディングなし ★
-        const result = await callGeminiModelSwitcher(combinedPrompt, 'gemini-2.5-flash-preview-04-17', false, null);
+        // ★ 翻訳: モデル 'gemini-2.5-flash', グラウンディングなし ★
+        const result = await callGeminiModelSwitcher(combinedPrompt, 'gemini-2.5-flash', false, null);
         
         if (thinkingTimeoutId) {
             clearTimeout(thinkingTimeoutId);
@@ -640,18 +632,19 @@ async function callGemini(userInput) {
         if (loadingRow && loadingRow.parentElement) {
             console.log("Replacing '考え中だゾウ...' message with actual response.");
             const newRowContainer = document.createElement('div');
-            addMessageRowToElement(newRowContainer, result.result, 'other', new Date(), result.sources);
+            // ★ 応答形式の統一により、アクセス方法も統一 ★
+            addMessageRowToElement(newRowContainer, result.result.answer, 'other', new Date(), result.sources);
             if (newRowContainer.firstChild) {
                 loadingRow.replaceWith(newRowContainer.firstChild);
             } else {
                 console.error("Failed to create new message row for replacement. Removing thinking row.");
                 loadingRow.remove();
-                addMessageRow(result.result || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
+                addMessageRow(result.result.answer || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
             }
         } else {
             console.log("Response received before '考え中だゾウ...' timeout. Adding as new message.");
-            if (result && result.result) {
-                addMessageRow(result.result, 'other', new Date(), result.sources);
+            if (result && result.result && result.result.answer) {
+                addMessageRow(result.result.answer, 'other', new Date(), result.sources);
             } else {
                 addMessageRow("翻訳結果がありませんでした。(No translation result) だゾウ", 'other');
                 console.error("Translation result was empty or invalid:", result);
@@ -678,7 +671,7 @@ async function callGemini(userInput) {
         }
     } finally {
         scrollToBottom();
-    }
+    }    
 }
 
 // addMessageRow の主要ロジックを要素に直接適用するヘルパー関数
@@ -807,7 +800,7 @@ async function buildRefinementPrompt(context, originalAnswer) {
     console.log("Building refinement prompt...");
     // context には、台湾華語モードの場合は翻訳結果、それ以外は会話履歴が入る想定
     // 台湾華語モードかどうかの判定はここでは難しいので、プロンプトを汎用的にする
-    return `あなたは、応答の語尾をすべて「だゾウ」で終える、親しみやすいゾウのキャラクターです。以下の【元のテキスト】を受け取り、その内容と意味を完全に維持したまま、自然な形で全ての文末が「だゾウ」になるように修正してください。修正されたテキストのみを出力し、それ以外の前置きや説明は一切含めないでください。
+    return `あなたは、非常に優秀で親しみやすいゾウのキャラクターです。あなたの応答の語尾は、基本的にはすべて「だゾウ」で統一してください。ただし、文脈に応じて「〜ゾウ」のように、より自然な形で終わらせることも許可します（例：「いいですね」→「いいゾウ」）。以下の【元のテキスト】を受け取り、その内容と意味を完全に維持したまま、キャラクターとして自然な口調になるように修正してください。修正されたテキストのみを出力し、それ以外の前置きや説明は一切含めないでください。
 
 【元のテキスト】
 ${originalAnswer}
@@ -946,7 +939,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const headerControls = document.querySelector('#main-header .header-controls'); // ★ ここで取得
         const sideMenu = document.getElementById('side-menu');
 
-        setAppHeight(); // ★ 認証状態変更時にも高さを設定 ★
+        // setAppHeight(); // ★ 認証状態変更時にも高さを設定 ★
 
         if (user) {
             // ★ ログイン時のログを追加 ★
@@ -995,45 +988,8 @@ document.addEventListener('DOMContentLoaded', () => {
              }
 
         } else {
-             // ★ ログアウト時のログを追加 ★
-             console.log("User logged out. Attempting to hide UI elements and show login.");
-
-             if (loginContainer) loginContainer.style.display = 'block';
-             if (mainContent) mainContent.style.display = 'none';
-
-             // ★ headerControls の存在確認とスタイル設定ログ (非表示) ★
-             if (headerControls) {
-                 console.log("Header controls element FOUND. Setting display to none.");
-                 headerControls.style.display = 'none'; // 非表示
-             } else {
-                 console.error("Header controls element (#main-header .header-controls) NOT FOUND when trying to hide!");
-             }
-
-             if (sideMenu) {
-                 console.log("Side menu element FOUND. Setting display to none.");
-                  sideMenu.style.display = 'none'; // 非表示
-             } else {
-                 console.error("Side menu element (#side-menu) NOT FOUND when trying to hide!");
-             }
-
-            // ... (FirebaseUI の開始処理など)
-            if (ui) {
-                // FirebaseUIのインスタンスが存在すれば開始
-                console.log("Starting FirebaseUI...");
-                ui.start('#firebaseui-auth-container', uiConfig);
-            } else {
-                // 既にあれば、 AuthUI インスタンスは作成しない
-                console.warn("FirebaseUI instance (ui) is null, cannot start. This might happen if initialization failed or was skipped.");
-                // フォールバックとして再度初期化を試みるか、エラーメッセージを表示
-                // FirebaseUI コンテナに手動でメッセージを表示することも検討
-                const fbAuthContainer = document.getElementById('firebaseui-auth-container');
-                if (fbAuthContainer && !fbAuthContainer.hasChildNodes()) { // コンテナが空の場合のみメッセージ追加
-                    fbAuthContainer.innerHTML = '<p style="color: red;">ログインウィジェットの表示に問題が発生しました。ページを再読み込みしてください。</p>'
-                }
-            }
-            // conversationSessions = []; // 履歴管理は不要なため削除
-            // currentSession = null;     // 履歴管理は不要なため削除
-            updateSideMenu(); // サイドメニューを更新（「履歴はありません」を表示）
+             // ★ ユーザーがログインしていない場合、login.htmlにリダイレクト ★
+             window.location.href = 'login.html';
         }
     });
 
@@ -1137,9 +1093,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeSpeechRecognition();
 
     // --- アプリケーションの高さ設定リスナー ---
-    window.addEventListener('resize', setAppHeight);
+    // window.addEventListener('resize', setAppHeight);
     // 初期ロード時にも実行
-    setAppHeight();
+    // setAppHeight();
 
     // --- 象の画像クリックイベントリスナー (復活/確認) ---
     const elephantImg = document.getElementById("elephantImg");
@@ -1449,11 +1405,11 @@ function parseDateString(dateString) {
 }
 
 // ===== アプリケーションの高さを設定する関数 =====
-function setAppHeight() {
+/* function setAppHeight() {
   const doc = document.documentElement;
   doc.style.setProperty('--app-height', `${window.innerHeight}px`);
   console.log(`App height set to: ${window.innerHeight}px`); // デバッグ用ログ
-}
+} */
 
 // ===== 台湾の天気予報を取得・表示する関数 =====
 async function getTaiwanWeatherForecast() {
@@ -1508,10 +1464,10 @@ async function getTaiwanWeatherForecast() {
       const day = forecastDate.getDate();
       const dateForPrompt = `${year}年${month}月${day}日`;
 
-      const weatherPrompt = `あなたは親しみやすいゾウのキャラクターの気象予報士です。**応答の語尾は必ず「だゾウ」で統一してください。** 台湾の主要都市（台北、台中、台南、高雄、花蓮など）の${targetDateStr}（${dateForPrompt}）の天気予報（天気、最高気温、最低気温）、湿度を教えてください。可能であれば降水確率も教えてほしいだゾウ。応答には必ず予報の日付（${dateForPrompt}）を含めてください。ゾウのキャラクターであることや気象予報士であるという設定については、応答文に一切含めないでください。架空の情報である旨の記述は絶対に含めないでください。**最後に「この情報は[検索実行日時]時点の情報を元にしているだゾウ！」という形式で、情報を取得した検索エンジンの検索実行日時を必ず含めてください。**`;
+      const weatherPrompt = `あなたは親しみやすいゾウのキャラクターの気象予報士です。あなたの応答の語尾は、基本的にはすべて「だゾウ」で統一してください。ただし、文脈に応じて「〜ゾウ」のように、より自然な形で終わらせることも許可します（例：「いいですね」→「いいゾウ」）。台湾の主要都市（台北、台中、台南、高雄、花蓮など）の${targetDateStr}（${dateForPrompt}）の天気予報（天気、最高気温、最低気温）、湿度を教えてください。可能であれば降水確率も教えてほしいゾウ。応答には必ず予報の日付（${dateForPrompt}）を含めてください。ゾウのキャラクターであることや気象予報士であるという設定については、応答文に一切含めないでください。架空の情報である旨の記述は絶対に含めないでください。**最後に「この情報は[検索実行日時]時点の情報を元にしているゾウ！」という形式で、情報を取得した検索エンジンの検索実行日時を必ず含めてください。**`;
       console.log("Weather prompt to send for weather forecast:", weatherPrompt);
-      // ★ 天気予報: モデル 'gemini-1.5-pro', グラウンディングあり ★
-      const result = await callGeminiModelSwitcher(weatherPrompt, 'gemini-1.5-pro', true, 'googleSearchRetrieval'); // toolName を修正
+      // ★ 天気予報: モデル 'gemini-2.5-flash', グラウンディングあり ★
+      const result = await callGeminiModelSwitcher(weatherPrompt, 'gemini-2.5-flash', true, 'googleSearch'); // toolName を 'googleSearch' に修正
 
       if (thinkingTimeoutId) {
           clearTimeout(thinkingTimeoutId);
@@ -1521,18 +1477,19 @@ async function getTaiwanWeatherForecast() {
       if (loadingRow && loadingRow.parentElement) {
           console.log("Replacing '天気を調べてるゾウ...' message with actual weather forecast.");
           const newRowContainer = document.createElement('div');
-          addMessageRowToElement(newRowContainer, result.result, 'other', new Date(), result.sources);
+           // ★ 応答形式の統一により、アクセス方法も統一 ★
+          addMessageRowToElement(newRowContainer, result.result.answer, 'other', new Date(), result.sources);
           if (newRowContainer.firstChild) {
             loadingRow.replaceWith(newRowContainer.firstChild);
           } else {
             console.error("Failed to create new message row for weather replacement. Removing thinking row.");
             loadingRow.remove();
-            addMessageRow(result.result || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
+            addMessageRow(result.result.answer || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
           }
       } else {
           console.log("Weather response received before '天気を調べてるゾウ...' timeout. Adding as new message.");
-          if (result && result.result) {
-            addMessageRow(result.result, 'other', new Date(), result.sources);
+          if (result && result.result && result.result.answer) {
+            addMessageRow(result.result.answer, 'other', new Date(), result.sources);
           } else {
             addMessageRow("天気予報がありませんでしただゾウ。", 'other');
             console.error("Weather forecast result was empty or invalid:", result);

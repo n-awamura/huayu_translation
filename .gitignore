@@ -75,3 +75,27 @@ node_modules/
 wrangler.toml
 wrangler.jsonc
 
+# Thumbnails
+._*
+.DS_Store
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP shares
+.AppleDB
+.AppleDesktop
+.AppleDouble
+.LSOverride
+
+# End of https://www.gitignore.io/api/macos
+
+js/old.js
+img/.DS_Store
+

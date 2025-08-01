@@ -9,6 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="CHAT">
   <meta name="theme-color" content="#D8DBE0">
   <link rel="apple-touch-icon" sizes="180x180" href="img/elephant.png">
+  <link rel="icon" href="data:,">
 
 
   <!-- 外部CSS -->
@@ -23,16 +24,16 @@
   <!-- Firebase App (必須) -->
   <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
   <!-- Firestore -->
-  <!-- <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-firestore-compat.js"></script> -->
+  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-firestore-compat.js"></script>
   <!-- Auth -->
   <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-auth-compat.js"></script>
   <!-- Analytics（任意） -->
-  <!-- <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-analytics-compat.js"></script> -->
+  <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-analytics-compat.js"></script>
 
   <script>
     // Firebase 設定する
     const firebaseConfig = {
-      apiKey: "AIzaSyCGsox95fxZh4J4ZQz4pm2o2_YwXUbXcaU", // ご自身のキーに置き換えてください
+      apiKey: "AIzaSyCGsox95fxZh4J4ZQz4pm2o2_YwXUbXcaU",
       authDomain: "fudaoxiang-chat.firebaseapp.com",
       projectId: "fudaoxiang-chat",
       storageBucket: "fudaoxiang-chat.firebasestorage.app",
@@ -43,22 +44,22 @@
 
     // Firebase 初期化
     firebase.initializeApp(firebaseConfig);
-    // firebase.analytics(); // Analytics は今回は不要
-    // const db = firebase.firestore(); // Firestore は今回は不要
-    // window.db = db; // Firestore は今回は不要
+    firebase.analytics();
+    const db = firebase.firestore();
+    window.db = db;
 
-    // 認証チェックは js/script.js の onAuthStateChanged でUI制御するためここでは削除
-    // firebase.auth().onAuthStateChanged((user) => {
-    //   if (!user) {
-    //     window.location.href = "login.html"; // login.html がなければこのリダイレクトはエラーになる
-    //   }
-    // });
+    // 認証チェック（ログインしてなければリダイレクト）
+    firebase.auth().onAuthStateChanged((user) => {
+      if (!user) {
+        window.location.href = "login.html";
+      }
+    });
   </script>
 </head>
 
 <body>
-  <!-- FirebaseUI Container -->
-  <div id="firebaseui-auth-container"></div>
+  <!-- FirebaseUI Container (Initially hidden by CSS/JS logic) -->
+  <div id="firebaseui-auth-container" style="display: none;"></div>
 
   <!-- ヘッダー -->
   <header id="main-header">
@@ -67,15 +68,22 @@
       <div id="elephantBubble" class="speech-bubble"></div>
       <div id="chatHeaderTitle" class="title">TRANSLATION</div>
     </div>
-    <div class="header-controls">
-      <!-- <select id="model-select">
-        <option value="gemini-1.5-pro-tw">🇹🇼 TW (1.5 Pro)</option>
-        <option value="gemini-1.5-pro" selected>💨 Normal (1.5 Pro)</option>
-        <option value="gemini-2.0-flash">⚡️ Flash (2.0)</option>
-      </select> -->
-      <button id="weatherBtn" class="control-btn" title="天気予報"><i class="bi bi-sun"></i></button>
-      <button id="new-chat" class="control-btn" title="新規作成"><i class="bi bi-pencil-square"></i></button>
-      <i id="hamburger" class="bi bi-list control-btn" title="メニュー"></i>
+    <div class="header-controls" style="display: none;">
+      <!-- Model Selector Dropdown -->
+      <!--
+      <select id="model-select">
+        <option value="gemini-1.5-pro" selected>ノーマル</option>
+        <option value="gemini-1.5-pro-tw">台湾華語</option>
+      </select>
+      -->
+      <button class="new-chat" id="new-chat" title="新しいチャット">
+        <i class="bi bi-pencil-square"></i>
+      </button>
+      <!-- Weather Button (Add this between dropdown and hamburger) -->
+      <!-- <button id="weather-btn" class="icon-button" title="天気予報を表示">
+        <i class="bi bi-sun"></i>
+      </button> -->
+      <i class="bi bi-list hamburger" id="hamburger" title="Menu"></i>
     </div>
   </header>
 
@@ -105,17 +113,11 @@
 
   <!-- チャット -->
   <div class="chat-container">
-    <div id="chatMessages" class="chat-messages">
-      <!-- メッセージがここに追加される -->
-    </div>
-    <!-- <div id="thinkingIndicator" class="thinking-indicator" style="display: none;">
-      <img src="img/elephant_thinking.png" alt="考え中" class="thinking-elephant">
-      <span class="thinking-text">考え中だゾウ...</span>
-    </div> -->
-    <div class="chat-input">
-      <textarea id="chatInput" placeholder="メッセージを入力..."></textarea>
-      <button id="micBtn" title="音声入力"><i class="bi bi-mic-fill"></i></button>
-      <button id="sendBtn"><i class="bi bi-send-fill"></i></button>
+    <div id="chatMessages" class="chat-messages"></div>
+    <div class="chat-footer">
+        <textarea id="chatInput" placeholder="メッセージを入力..." rows="1"></textarea>
+        <button id="micBtn" class="icon-btn" title="音声入力"><i class="bi bi-mic-fill"></i></button>
+        <button id="sendBtn" class="icon-btn" title="送信"><i class="bi bi-send-fill"></i></button>
     </div>
   </div>
 

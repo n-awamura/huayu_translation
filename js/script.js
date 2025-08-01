@@ -186,81 +186,81 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     //     // 「考え中」メッセージの場合、text をそのまま innerHTML として設定
     //     bubbleText.innerHTML = text;
     // } else {
-        // --- Text Processing --- (Revised Flow for Code Blocks) ---
-        const originalTextForCopy = text;
-        const codeBlocks = []; // Keep track of code blocks separately if needed later
-        const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g; // FIX: Allow whitespace after lang name
-        let lastIndex = 0;
-        let match;
-        let blockIndex = 0;
-        const segments = []; // Array to hold alternating text and code block objects
+    // --- Text Processing --- (Revised Flow for Code Blocks) ---
+    const originalTextForCopy = text;
+    const codeBlocks = []; // Keep track of code blocks separately if needed later
+    const codeBlockRegex = /```(\w*)\s*\n([\s\S]*?)```/g; // FIX: Allow whitespace after lang name
+    let lastIndex = 0;
+    let match;
+    let blockIndex = 0;
+    const segments = []; // Array to hold alternating text and code block objects
 
-        // 1. Extract Code Blocks and Identify Text Segments
-        while ((match = codeBlockRegex.exec(text)) !== null) {
-            // Add text segment before the code block
-            if (match.index > lastIndex) {
-                segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
-            }
-
-            // Add code block segment
-            const lang = match[1] || 'plaintext';
-            const code = match[2];
-            segments.push({ type: 'code', lang: lang, content: code, index: blockIndex });
-            codeBlocks.push({ lang, code }); // Optional: Store extracted code blocks
-
-            lastIndex = codeBlockRegex.lastIndex; // Update index for next segment
-            blockIndex++;
-        }
-        // Add the remaining text segment after the last code block
-        if (lastIndex < text.length) {
-            segments.push({ type: 'text', content: text.substring(lastIndex) });
+    // 1. Extract Code Blocks and Identify Text Segments
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+        // Add text segment before the code block
+        if (match.index > lastIndex) {
+            segments.push({ type: 'text', content: text.substring(lastIndex, match.index) });
         }
 
-        console.log("Processed Segments (Text/Code):", segments);
+        // Add code block segment
+        const lang = match[1] || 'plaintext';
+        const code = match[2];
+        segments.push({ type: 'code', lang: lang, content: code, index: blockIndex });
+        codeBlocks.push({ lang, code }); // Optional: Store extracted code blocks
 
-        // 2. Process Segments and Build Final HTML
-        let finalHtml = '';
-        segments.forEach(segment => {
-            if (segment.type === 'text') {
-                // Process the text segment using the markdown helper
-                 if (segment.content && segment.content.trim()) { // Avoid processing empty/whitespace segments
-                     finalHtml += processMarkdownSegment(segment.content);
-                 }
-            } else if (segment.type === 'code') {
-                // Generate HTML for the code block
-                const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
-                const escapedCode = escapeHtml(segment.content.trim()); // Trim code before escaping
-                // FIX: Move button inside <pre>
-                const codeBlockHtml = `<div class="code-block-container">
-                                        <pre>
+        lastIndex = codeBlockRegex.lastIndex; // Update index for next segment
+        blockIndex++;
+    }
+    // Add the remaining text segment after the last code block
+    if (lastIndex < text.length) {
+        segments.push({ type: 'text', content: text.substring(lastIndex) });
+    }
+
+    console.log("Processed Segments (Text/Code):", segments);
+
+    // 2. Process Segments and Build Final HTML
+    let finalHtml = '';
+    segments.forEach(segment => {
+        if (segment.type === 'text') {
+            // Process the text segment using the markdown helper
+             if (segment.content && segment.content.trim()) { // Avoid processing empty/whitespace segments
+                 finalHtml += processMarkdownSegment(segment.content);
+             }
+        } else if (segment.type === 'code') {
+            // Generate HTML for the code block
+            const codeId = `code-${Date.now()}-${segment.index}-${Math.random().toString(36).substring(2)}`;
+            const escapedCode = escapeHtml(segment.content.trim()); // Trim code before escaping
+            // FIX: Move button inside <pre>
+            const codeBlockHtml = `<div class="code-block-container">
+                                    <pre>
 <button class="copy-code-btn" data-clipboard-target="#${codeId}" title="コードをコピー"><i class="bi bi-clipboard"></i></button>
 <code id="${codeId}" class="language-${segment.lang}">${escapedCode}</code>
 </pre>
-                                      </div>`;
-                finalHtml += codeBlockHtml; // Add code block HTML directly
-            }
-        });
+                                  </div>`;
+            finalHtml += codeBlockHtml; // Add code block HTML directly
+        }
+    });
 
-        console.log("Final HTML with Code Blocks Correctly Interleaved:", finalHtml);
-        bubbleText.innerHTML = finalHtml; // Set the final HTML
+    console.log("Final HTML with Code Blocks Correctly Interleaved:", finalHtml);
+    bubbleText.innerHTML = finalHtml; // Set the final HTML
 
         // --- Message Copy Button (通常のメッセージにのみ追加) ---
-        const copyMsgBtn = document.createElement('button');
-        copyMsgBtn.classList.add('copy-msg-btn');
-        copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
-        copyMsgBtn.title = 'メッセージをコピー';
-        copyMsgBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(originalTextForCopy)
-                .then(() => {
-                    copyMsgBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
-                    copyMsgBtn.title = 'コピーしました';
-                    setTimeout(() => {
-                        copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
-                        copyMsgBtn.title = 'メッセージをコピー';
-                    }, 1500);
-                })
-                .catch(err => console.error('コピー失敗:', err));
-        });
+    const copyMsgBtn = document.createElement('button');
+    copyMsgBtn.classList.add('copy-msg-btn');
+    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+    copyMsgBtn.title = 'メッセージをコピー';
+    copyMsgBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(originalTextForCopy)
+            .then(() => {
+                copyMsgBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                copyMsgBtn.title = 'コピーしました';
+                setTimeout(() => {
+                    copyMsgBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
+                    copyMsgBtn.title = 'メッセージをコピー';
+                }, 1500);
+            })
+            .catch(err => console.error('コピー失敗:', err));
+    });
         bubble.appendChild(copyMsgBtn); // Copy button inside bubble
     // } // elseブロックを削除
 
@@ -286,45 +286,45 @@ function addMessageRow(text, sender, timestamp = null, sources = null) {
     console.log("Appended row to chat messages div.");
 
     // if (!isThinking) {
-        // --- Highlight Code Blocks using Prism.js --- (修正: 同期的に実行)
-        console.log("Executing Prism.highlightAllUnder...");
-        try {
-            // Ensure Prism is loaded before calling this
-            if (typeof Prism !== 'undefined') {
-                Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
-                console.log("Prism highlighting finished.");
-            } else {
-                console.warn("Prism object not found, skipping highlighting.");
-            }
-        } catch (e) {
-            console.error("Error during Prism highlighting:", e);
+    // --- Highlight Code Blocks using Prism.js --- (修正: 同期的に実行)
+    console.log("Executing Prism.highlightAllUnder...");
+    try {
+        // Ensure Prism is loaded before calling this
+        if (typeof Prism !== 'undefined') {
+            Prism.highlightAllUnder(bubble); // Highlight only within the new bubble
+            console.log("Prism highlighting finished.");
+        } else {
+            console.warn("Prism object not found, skipping highlighting.");
         }
+    } catch (e) {
+        console.error("Error during Prism highlighting:", e);
+    }
 
-        // --- Code Block Copy Listener (Re-added) ---
-        bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
-            if (!btn.dataset.listenerAttached) {
-                btn.addEventListener('click', (event) => {
-                    const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
-                    const codeElement = document.querySelector(targetSelector);
-                    if (codeElement) {
-                        // Copy the *unescaped* text content for code blocks
-                        navigator.clipboard.writeText(codeElement.textContent)
-                            .then(() => {
-                                const buttonElement = event.target.closest('button');
-                                buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
-                                buttonElement.title = 'コピーしました';
-                                setTimeout(() => {
-                                    buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
-                                    buttonElement.title = 'コードをコピー';
-                                }, 1500);
-                            })
-                            .catch(err => console.error('コードのコピー失敗:', err));
-                    }
-                });
-                btn.dataset.listenerAttached = 'true';
-                 // Assuming button HTML is generated with icon & title
-            }
-        });
+    // --- Code Block Copy Listener (Re-added) ---
+    bubble.querySelectorAll('.copy-code-btn').forEach(btn => {
+        if (!btn.dataset.listenerAttached) {
+            btn.addEventListener('click', (event) => {
+                const targetSelector = event.target.closest('button').getAttribute('data-clipboard-target');
+                const codeElement = document.querySelector(targetSelector);
+                if (codeElement) {
+                    // Copy the *unescaped* text content for code blocks
+                    navigator.clipboard.writeText(codeElement.textContent)
+                        .then(() => {
+                            const buttonElement = event.target.closest('button');
+                            buttonElement.innerHTML = '<i class="bi bi-check-lg"></i>';
+                            buttonElement.title = 'コピーしました';
+                            setTimeout(() => {
+                                buttonElement.innerHTML = '<i class="bi bi-clipboard"></i>';
+                                buttonElement.title = 'コードをコピー';
+                            }, 1500);
+                        })
+                        .catch(err => console.error('コードのコピー失敗:', err));
+                }
+            });
+            btn.dataset.listenerAttached = 'true';
+             // Assuming button HTML is generated with icon & title
+        }
+    });
     // }
     console.log("--- addMessageRow End (Corrected Code Block Handling) ---");
 }
@@ -484,8 +484,8 @@ async function startNewChat() {
 
 async function createNewSession() {
     console.log("Creating a new session (UI reset).");
-    document.getElementById('chatMessages').innerHTML = "";
-    lastHeaderDate = null;
+        document.getElementById('chatMessages').innerHTML = "";
+        lastHeaderDate = null;
     const chatInputElement = document.getElementById('chatInput'); // ID を 'chatInput' に変更
     if (chatInputElement) { 
         chatInputElement.value = ''; 
@@ -494,8 +494,8 @@ async function createNewSession() {
         console.error("Element with ID 'chatInput' not found in createNewSession.");
     }
     document.getElementById('chatHeaderTitle').textContent = 'TRANSLATION'; 
-    scrollToBottom();
-    return Promise.resolve(); 
+        scrollToBottom();
+        return Promise.resolve(); 
 }
 
 // ===== API呼び出し関数 (Model Switcher のみ) =====
@@ -503,7 +503,7 @@ async function createNewSession() {
 
 // Gemini Model Switcher Workerを呼び出す関数 (デフォルトモデル名を 1.5-pro に変更)
 async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.5-flash', useGrounding = false, toolName = null, retryCount = 0) {
-    const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev";
+    const workerUrl = "https://gemini-model-switcher.fudaoxiang-gym.workers.dev"; 
     const maxRetries = 2;
 
     try {
@@ -523,19 +523,25 @@ async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.5-flash', u
 
         } else {
             // ★ グラウンディングなしの場合はPOSTリクエスト ★
-            response = await fetch(workerUrl, {
+            // ★ 修正: Workerが期待するGemini API v1beta形式のボディを作成 ★
+            const requestPayload = {
+                // modelName: modelName, // Worker側でモデル名を取得する方法が変更されたため、ここでは不要
+                contents: [{ parts: [{ text: prompt }] }]
+            };
+
+            // モデル名をクエリパラメータで渡すように変更
+            const urlWithModel = new URL(workerUrl);
+            urlWithModel.searchParams.set('model', modelName);
+
+            response = await fetch(urlWithModel.toString(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt: prompt,
-                    model: modelName
-                    // tool_name はPOSTでは使用されないので含めない
-                })
+                body: JSON.stringify(requestPayload)
             });
         }
 
         if (!response.ok) {
-            const errorText = await response.text();
+             const errorText = await response.text();
             throw new Error(`Worker Error (${response.status}): ${errorText}`);
         }
 
@@ -561,9 +567,9 @@ async function callGeminiModelSwitcher(prompt, modelName = 'gemini-2.5-flash', u
         console.error(`Error calling Gemini Model Switcher (Attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message);
         if (retryCount < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-            return callGeminiModelSwitcher(prompt, modelName, useGrounding, toolName, retryCount + 1);
+            return callGeminiModelSwitcher(prompt, modelName, useGrounding, toolName, retryCount + 1); 
         } else {
-            throw error;
+             throw error;
         }
     }
 }
@@ -595,8 +601,8 @@ async function callGemini(userInput) {
             icon.src = 'img/elephant.png';
             icon.alt = '相手アイコン';
             loadingRow.appendChild(icon);
-            const bubble = document.createElement('div');
-            bubble.classList.add('bubble');
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
             loadingTextElement = document.createElement('div');
             loadingTextElement.classList.add('bubble-text', 'blinking-text');
             loadingTextElement.innerHTML = "<div class='temp-thinking-message'>考え中だゾウ...</div>";
@@ -608,11 +614,11 @@ async function callGemini(userInput) {
             const minutes = nowTime.getMinutes().toString().padStart(2, '0');
             bubbleTime.innerText = `${hours}:${minutes}`;
             bubble.appendChild(bubbleTime);
-            loadingRow.appendChild(bubble);
-            chatMessagesDiv.appendChild(loadingRow);
-            scrollToBottom();
+        loadingRow.appendChild(bubble);
+        chatMessagesDiv.appendChild(loadingRow);
+        scrollToBottom();
             console.log("Displayed '考え中だゾウ...' message (delayed).");
-        }, delayTime);
+    }, delayTime);
 
         const characterPrompt = "あなたは非常に優秀な翻訳家で、親しみやすいゾウのキャラクターです。あなたの応答の語尾は、基本的にはすべて「だゾウ」で統一してください。ただし、文脈に応じて「〜ゾウ」のように、より自然な形で終わらせることも許可します（例：「いいですね」→「いいゾウ」）。キャラクター設定に関する言及は、応答に一切含めないでください。";
         const translationRequest = `ユーザーが入力した日本語「${userInput}」を、自然な台湾華語（繁体字中国語）に訳してください。\nその際、以下の点に注意して回答を生成してください。\n1. 主な翻訳をまず提示する。
@@ -636,7 +642,7 @@ async function callGemini(userInput) {
             addMessageRowToElement(newRowContainer, result.result.answer, 'other', new Date(), result.sources);
             if (newRowContainer.firstChild) {
                 loadingRow.replaceWith(newRowContainer.firstChild);
-            } else {
+                     } else {
                 console.error("Failed to create new message row for replacement. Removing thinking row.");
                 loadingRow.remove();
                 addMessageRow(result.result.answer || "応答の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
@@ -666,7 +672,7 @@ async function callGemini(userInput) {
                 loadingRow.remove();
                 addMessageRow(`翻訳中にエラーが発生しました: ${error.message}`, 'other');
             }
-        } else {
+                     } else {
             addMessageRow(`翻訳中にエラーが発生しました: ${error.message}`, 'other');
         }
     } finally {
@@ -877,7 +883,7 @@ function showThinkingIndicator(show) {
     const bubble = document.getElementById('elephantBubble');
     if (!bubble) return;
 
-    if (show) {
+        if (show) {
         bubble.textContent = "考え中だゾウ...";
         bubble.classList.add('visible');
         adjustSpeechBubbleFontSize(); // 表示時にフォント調整
@@ -1481,7 +1487,7 @@ async function getTaiwanWeatherForecast() {
           addMessageRowToElement(newRowContainer, result.result.answer, 'other', new Date(), result.sources);
           if (newRowContainer.firstChild) {
             loadingRow.replaceWith(newRowContainer.firstChild);
-          } else {
+        } else {
             console.error("Failed to create new message row for weather replacement. Removing thinking row.");
             loadingRow.remove();
             addMessageRow(result.result.answer || "天気予報の表示に失敗しましただゾウ。", 'other', new Date(), result.sources);
@@ -1507,11 +1513,11 @@ async function getTaiwanWeatherForecast() {
       if (bubbleTextDiv) {
         bubbleTextDiv.classList.remove('blinking-text');
         bubbleTextDiv.innerHTML = `<div class='temp-thinking-message error-message'>天気予報の取得中にエラーが発生しました: ${escapeHtml(error.message)} だゾウ</div>`;
-      } else {
+        } else {
         loadingRow.remove();
         addMessageRow(`天気予報の取得中にエラーが発生しました: ${error.message}`, 'other');
       }
-    } else {
+      } else {
       addMessageRow(`天気予報の取得中にエラーが発生しました: ${error.message}`, 'other');
     }
   } finally {

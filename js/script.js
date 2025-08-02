@@ -381,7 +381,7 @@ async function callGemini(userInput, imageFile = null) {
                 reader.onerror = reject;
                 reader.readAsDataURL(imageFile.file);
             });
-            const recognitionPrompt = "この画像に写っている主要な物体、ランドマーク、または人物を最も的確に表す、固有名詞（可能な場合）を含む短いテキストを返してください。";
+            const recognitionPrompt = "この画像を分析してください。もし画像が看板、メニュー、スライドなど、主にテキストで構成されている場合は、そのテキストをすべて書き出してください。もし画像が物体、ランドマーク、人物などの写真である場合は、その対象を最も的確に表す固有名詞（可能な場合）を含む短いテキストを返してください。書き出したテキスト、または対象の名称のみを返し、それ以外の説明は不要です。";
             const step1Parts = [{ "inline_data": { "mime_type": imageFile.mimeType, "data": base64Image } }, { "text": recognitionPrompt }];
             const recognitionData = await callGeminiModelSwitcher(step1Parts, 'gemini-2.5-flash', false, null);
             const identifiedSubject = recognitionData?.result?.answer?.trim();
@@ -395,14 +395,15 @@ async function callGemini(userInput, imageFile = null) {
             const characterPrompt = "あなたは非常に優秀な翻訳家で、親しみやすいゾウのキャラクターです。あなたの応答の語尾は、基本的にはすべて「だゾウ」で統一してください。ただし、文脈に応じて「〜ゾウ」のように、より自然な形で終わらせることも許可します（例：「いいですね」→「いいゾウ」）。キャラクター設定に関する言及は、応答に一切含めないでください。";
             const finalSearchPrompt = `${characterPrompt}
 
-以下の指示に従って、与えられたテーマについて回答を生成してくださいだゾウ。
+上記のキャラクター設定および以下の指示に従って、与えられた「テキスト/テーマ」について解説してください。
 
-**テーマ:** ${identifiedSubject}
+**テキスト/テーマ:**
+「${identifiedSubject}」
 
 **指示:**
-1.  まず、テーマを自然な台湾華語（繁体字中国語）に翻訳し、拼音（ピンイン）を付記してほしいんだゾウ。カタカナのルビは不要だゾウ。
-2.  次に、その台湾華語の単語を使った日本語の例文と、簡単な文法解説を日本語で提供してほしいんだゾウ。
-3.  最後に、テーマに関する興味深い関連情報や豆知識を、日本語で詳しく解説してほしいんだゾウ。
+1.  まず、「テキスト/テーマ」を自然な台湾華語（繁体字中国語）に翻訳し、拼音（ピンイン）を付記してほしいんだゾウ。カタカナのルビは不要だゾウ。「テキスト/テーマ」が長文の場合は、全文を翻訳するんだゾウ。
+2.  次に、翻訳した台湾華語の中から主要な単語を1つ選び、その単語を使った例文を台湾華語（繁体字中国語）で、拼音（ピンイン）を付けて提示し、その例文の日本語訳と簡単な文法解説を日本語で提供してほしいんだゾウ。
+3.  最後に、「テキスト/テーマ」に関する興味深い関連情報や豆知識を、日本語で詳しく解説してほしいんだゾウ。「テキスト/テーマ」が長文の場合は、関連情報は簡潔で良いゾウ。
 
 ${userInput ? `ユーザーからの追加リクエスト: 「${userInput}」\nこのリクエストも考慮に入れるゾウ。` : ''}`;
             const step2Parts = [{ text: finalSearchPrompt }];

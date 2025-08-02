@@ -1099,9 +1099,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeSpeechRecognition();
 
     // --- アプリケーションの高さ設定リスナー ---
-    // window.addEventListener('resize', setAppHeight);
+    window.addEventListener('resize', setAppHeight);
     // 初期ロード時にも実行
-    // setAppHeight();
+    setAppHeight();
 
     // --- 象の画像クリックイベントリスナー (復活/確認) ---
     const elephantImg = document.getElementById("elephantImg");
@@ -1411,11 +1411,11 @@ function parseDateString(dateString) {
 }
 
 // ===== アプリケーションの高さを設定する関数 =====
-/* function setAppHeight() {
+function setAppHeight() {
   const doc = document.documentElement;
   doc.style.setProperty('--app-height', `${window.innerHeight}px`);
   console.log(`App height set to: ${window.innerHeight}px`); // デバッグ用ログ
-} */
+}
 
 // ===== 台湾の天気予報を取得・表示する関数 =====
 async function getTaiwanWeatherForecast() {
